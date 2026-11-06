@@ -38,6 +38,7 @@ const (
 	AnchorLateS         = 15 * 60
 	CandidateBefore     = 15 * 60 // candidate trips: scheduled run padded before the start
 	CandidateAfter      = 60 * 60 // ... and after the end
+	CommitAfter         = 3       // distinct GPS fixes on one trip before the memory matcher keeps it
 	forgetAfter         = time.Hour
 )
 
@@ -158,12 +159,24 @@ type Matcher struct {
 	geometry   map[geoKey]*geo.Geometry
 	shapeLines map[int32]*geo.Polyline
 	tracks     map[string]*track
+	commits    map[string]*commit
+	finished   map[string]map[tripDay]time.Time // vehicle -> trips it reached the end of
+}
+
+// commit is the trip a vehicle has held over its last fixes (memory matcher only). Once
+// committed, the vehicle keeps that trip while it stays feasible, and no other vehicle gets it.
+type commit struct {
+	td        tripDay
+	fixes     int
+	lastFix   time.Time
+	committed bool
 }
 
 func New(feed *gtfs.Feed, mapper *RouteMapper, kind Kind) *Matcher {
 	return &Matcher{Feed: feed, Mapper: mapper, Kind: kind, UseShapes: true,
 		previous: map[string]prevMatch{}, geometry: map[geoKey]*geo.Geometry{},
-		shapeLines: map[int32]*geo.Polyline{}, tracks: map[string]*track{}}
+		shapeLines: map[int32]*geo.Polyline{}, tracks: map[string]*track{},
+		commits: map[string]*commit{}, finished: map[string]map[tripDay]time.Time{}}
 }
 
 // Geometry returns the (cached) geometry of a trip's stop pattern, or nil when a stop is unknown.
@@ -245,6 +258,15 @@ func (m *Matcher) MatchLine(line string, vehicles []Obs) []Result {
 	for _, id := range order {
 		cands = append(cands, m.candidates(line, byID[id])...)
 	}
+	if m.Kind == Memory {
+		var now time.Time
+		for _, v := range vehicles {
+			if v.Time.After(now) {
+				now = v.Time
+			}
+		}
+		cands = m.applyCommits(cands, byID, now)
+	}
 	progress := map[string]float64{}
 	for _, c := range m.assign(cands) {
 		r := byID[c.vid]
@@ -265,7 +287,88 @@ func (m *Matcher) MatchLine(line string, vehicles []Obs) []Result {
 		}
 		out = append(out, *r)
 	}
+	if m.Kind == Memory {
+		m.updateCommits(out)
+	}
 	return out
+}
+
+// applyCommits drops the trips each vehicle already finished, keeps a committed vehicle on its
+// trip when that trip is still feasible, and takes that trip away from the other vehicles.
+// A committed trip without a feasible candidate (off route, delay out of range, moving
+// backwards) releases the commit. A committed vehicle missing from this poll keeps its trip
+// reserved for up to RunGapS after its last fix.
+func (m *Matcher) applyCommits(cands []candidate, present map[string]*Result, now time.Time) []candidate {
+	kept := cands[:0]
+	for _, c := range cands {
+		if _, done := m.finished[c.vid][tripDay{c.trip, c.day.Unix()}]; !done {
+			kept = append(kept, c)
+		}
+	}
+	reserved := map[tripDay]string{}
+	for _, c := range kept {
+		if cm := m.commits[c.vid]; cm != nil && cm.committed && cm.td == (tripDay{c.trip, c.day.Unix()}) {
+			reserved[cm.td] = c.vid
+		}
+	}
+	for vid, cm := range m.commits {
+		if _, here := present[vid]; !here && cm.committed && now.Sub(cm.lastFix) <= RunGapS*time.Second {
+			reserved[cm.td] = vid
+		}
+	}
+	out := kept[:0]
+	for _, c := range kept {
+		td := tripDay{c.trip, c.day.Unix()}
+		if owner, ok := reserved[td]; ok && owner != c.vid {
+			continue // another vehicle runs this trip
+		}
+		if cm := m.commits[c.vid]; cm != nil && reserved[cm.td] == c.vid && td != cm.td {
+			continue // this vehicle keeps its committed trip
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// updateCommits counts how many distinct fixes each vehicle has spent on its trip, and marks a
+// trip finished once the vehicle is within TerminalRadiusM of its last stop.
+func (m *Matcher) updateCommits(results []Result) {
+	for i := range results {
+		r := &results[i]
+		if !r.Matched() {
+			delete(m.commits, r.VehicleID)
+			continue
+		}
+		td := tripDay{r.Trip, r.Day.Unix()}
+		cm := m.commits[r.VehicleID]
+		switch {
+		case cm == nil || cm.td != td:
+			cm = &commit{td: td, fixes: 1, lastFix: r.Time}
+			m.commits[r.VehicleID] = cm
+		case r.Time.After(cm.lastFix):
+			cm.fixes++
+			cm.lastFix = r.Time
+		}
+		if cm.fixes >= CommitAfter {
+			cm.committed = true
+		}
+		for id, other := range m.commits {
+			if id != r.VehicleID && other.td == td {
+				delete(m.commits, id) // the trip changed hands while that vehicle was away
+			}
+		}
+		t := m.Feed.Trip(r.Trip)
+		g := m.Geometry(t)
+		last := m.stopXY(m.Feed.StopTime(t, m.Feed.NumStops(t)-1).Stop)
+		if g.StopAlong[len(g.StopAlong)-1]-r.Along <= TerminalRadiusM &&
+			geo.Dist(geo.XY(r.Lat, r.Lon), last) <= TerminalRadiusM {
+			if m.finished[r.VehicleID] == nil {
+				m.finished[r.VehicleID] = map[tripDay]time.Time{}
+			}
+			m.finished[r.VehicleID][td] = r.Time
+			delete(m.commits, r.VehicleID)
+		}
+	}
 }
 
 // Forget drops state of vehicles not seen for an hour (upstream keeps it forever).
@@ -278,6 +381,21 @@ func (m *Matcher) Forget(now time.Time) {
 	for id, t := range m.tracks {
 		if now.Sub(t.seen) > forgetAfter {
 			delete(m.tracks, id)
+		}
+	}
+	for id, cm := range m.commits {
+		if now.Sub(cm.lastFix) > forgetAfter {
+			delete(m.commits, id)
+		}
+	}
+	for id, done := range m.finished {
+		for td, at := range done {
+			if now.Sub(at) > forgetAfter {
+				delete(done, td)
+			}
+		}
+		if len(done) == 0 {
+			delete(m.finished, id)
 		}
 	}
 }
@@ -535,6 +653,7 @@ func (m *Matcher) updateTrack(r *Result, base []candidate) *track {
 		(len(tr.fixes) > 0 && r.Time.Sub(tr.fixes[len(tr.fixes)-1].ts).Seconds() > RunGapS) {
 		tr = &track{routeCode: r.RouteCode, positions: map[posKey][]geo.Cand{}}
 		m.tracks[r.VehicleID] = tr
+		delete(m.commits, r.VehicleID) // a new run: another route code, or a long gap
 	}
 	tr.seen = r.Time
 	if len(tr.fixes) == 0 || !tr.fixes[len(tr.fixes)-1].ts.Equal(r.Time) {
