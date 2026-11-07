@@ -48,5 +48,43 @@ hours before the next was added. Columns: probes, gap, the longest cycle and the
 seen in the window, upstream errors (HTTP other than 200/404, or network), and the process CPU / RSS
 with that many cities on.
 
-| # | City | Window (Athens) | Lines | Probes | Gap ms | Max cycle s | Oldest pos. s | Errors | Buses (max) | CPU % | RSS MB |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+| # | City | Window (Athens) | Lines | Probes | Gap ms | Max cycle s | Oldest pos. s | Errors | Buses (max) | CPU % | RSS MB | Bridge before: cycle s / oldest s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | agrinio | 2026-11-07 06:15–06:25 | 14 | 73 | 810 | 59 | – | 0 | 0 | 0.1 | 27 | – |
+| 2 | alexandroupoli | 2026-11-07 06:26–06:36 | 18 | 39 | 1000 | 39 | 17 | 0 | 1 | 0.3 | 38 | 39 / 4 |
+| 3 | arta | 2026-11-07 06:39–06:49 | 9 | 42 | 1000 | 42 | 110 | 0 | 2 | 0.4 | 44 | – |
+| 4 | veroia | 2026-11-07 06:51–07:01 | 19 | 19 | 1000 | 19 | 15 | 0 | 2 | 0.5 | 49 | – |
+| 5 | volos | 2026-11-07 07:03–07:13 | 12 | 49 | 1000 | 49 | 115 | 0 | 12 | 0.6 | 67 | – |
+| 6 | drama | 2026-11-07 07:15–07:25 | 13 | 32 | 1000 | 32 | – | 0 | 0 | 0.7 | 73 | – |
+| 7 | heraklion | 2026-11-07 07:26–07:36 | 24 | 55 | 1000 | 55 | 113 | 0 | 14 | 0.9 | 100 | 55 / 104 |
+| 8 | ioannina | 2026-11-07 07:43–07:53 | 16 | 64 | 923 | 59 | 115 | 0 | 11 | 1.0 | 121 | – |
+| 9 | kavala | 2026-11-07 07:55–08:05 | 19 | 25 | 1000 | 25 | 117 | 0 | 8 | 1.2 | 129 | – |
+| 10 | kastoria | 2026-11-07 08:08–08:18 | 18 | 24 | 1000 | 24 | – | 0 | 0 | 0.8 | 137 | – |
+| 11 | katerini | 2026-11-07 12:47–12:57 | 14 | 75 | 789 | 59 | 119 | 0 | 9 | 1.3 | 154 | – |
+| 12 | corfu | 2026-11-07 13:00–13:10 | 12 | 53 | 1000 | 53 | 113 | 0 | 9 | 1.2 | 160 | – |
+| 13 | kozani | 2026-11-07 13:14–13:24 | 16 | 48 | 1000 | 48 | 110 | 0 | 5 | 1.3 | 174 | – |
+| 14 | komotini | 2026-11-07 13:26–13:36 | 14 | 24 | 1000 | 24 | 119 | 0 | 5 | 1.5 | 180 | – |
+| 15 | lamia | 2026-11-07 13:38–13:48 | 13 | 24 | 1000 | 24 | 119 | 0 | 13 | 1.7 | 189 | – |
+| 16 | larissa | 2026-11-07 13:52–14:02 | 20 | 67 | 882 | 59 | 119 | 0 | 20 | 1.5 | 212 | – |
+| 17 | mesologgi | 2026-11-07 14:04–14:14 | 6 | 20 | 1000 | 20 | 19 | 0 | 1 | 1.9 | 215 | – |
+| 18 | mitilini | 2026-11-07 14:17–14:27 | 8 | 36 | 1000 | 36 | 96 | 0 | 5 | 1.8 | 223 | – |
+| 19 | naousa | 2026-11-07 14:28–14:38 | 6 | 16 | 1000 | 18 | – | 0 | 0 | 2.0 | 229 | – |
+| 20 | xanthi | 2026-11-07 14:40–14:50 | 15 | 24 | 1000 | 24 | 24 | 0 | 4 | 2.2 | 233 | – |
+| 21 | patras | 2026-11-07 14:51–15:01 | 30 | 61 | 967 | 59 | 115 | 0 | 22 | 2.4 | 261 | 59 / 78 |
+| 22 | ptolemaida | 2026-11-07 15:03–15:13 | 12 | 38 | 1000 | 38 | 108 | 0 | 1 | 2.2 | 263 | – |
+| 23 | serres | 2026-11-07 15:15–15:25 | 20 | 37 | 1000 | 37 | 37 | 0 | 2 | 2.3 | 267 | – |
+| 24 | chalkida | 2026-11-07 15:28–15:38 | 13 | 42 | 1000 | 42 | – | 0 | 0 | 2.3 | 276 | – |
+| 25 | chania | 2026-11-07 15:40–15:50 | 13 | 37 | 1000 | 37 | 107 | 0 | 11 | 2.4 | 288 | – |
+| 26 | chios | 2026-11-07 15:51–16:01 | 2 | 16 | 1000 | 16 | – | 0 | 0 | 2.6 | 294 | – |
+| 27 | salamina | 2026-11-07 16:03–16:13 | 8 | 26 | 1000 | 26 | 24 | 0 | 4 | 2.6 | 301 | – |
+| 28 | skiathos | 2026-11-07 16:14–16:24 | 1 | 10 | 1000 | 10 | – | 0 | 0 | 2.5 | 314 | – |
+
+`–` in Oldest: no bus was live in the window. `–` in the bridge column: no bridge snapshot was
+kept for that city. All 28 cities passed with 0 upstream errors and
+0 refused requests (about 600 requests per city per window). With 28 cities on, the process used
+2.5 % CPU and 314 MB RSS; RSS grows about 10 MB per city.
+
+- katerini, first window 2026-11-07 08:23–08:33: FAIL with 320 network errors, at the same moment in all cities on, no HTTP error status. Cause: the mini PC network (DNS), not citybus.gr. Measured again after the network came back: PASS.
+- Cities with more than ~55 probes (agrinio, ioannina, katerini, larissa, patras) run a cycle of 59 s, at the
+  60 s limit; for them the gap drops below 1000 ms (789-967 ms) to keep the cycle under 60 s.
+- The Bun bridge (`citybus-bridge`) is stopped and disabled since the last city moved.
