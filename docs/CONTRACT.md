@@ -14,7 +14,7 @@ Source of truth: `athens-transit-rt/docs/CONTRACT.md`. The frontend keeps a copy
   frontend repo by whoever made it (backend thread opens the copy as a commit or
   issue on the frontend repo).
 
-Revision: 21 (2026-11-07): an OASA Stop gets `code`, the code on the stop sign (GTFS
+Revision: 21 (2026-11-07): an OASA Stop (and the `stop` of `/v1/stops/{stop_id}`) gets `code`, the code on the stop sign (GTFS
 `stop_code`, e.g. `040054` for `oasa:40054`); missing when the source has none
 (rev 20: vehicles of `/v1/lines/{line_id}`, `/v1/vehicles` and its `z` 13 tiles
 get `along_m`, their metres along the static shape of their `variant`, and each variant of

@@ -135,7 +135,8 @@ A map view at MapLibre zoom 13 needs 2-15 tiles of 1-8 KB (gzip) instead of the 
 
 ## A stop and its arrivals
 
-`GET /v1/stops/{stop_id}` returns the stop (`id`, `name`, `lat`, `lon`), the `lines` that call
+`GET /v1/stops/{stop_id}` returns the stop (`id`, `name`, `lat`, `lon`, and `code`, the code on the
+stop sign, since rev 21), the `lines` that call
 there and `arrivals`, soonest first, up to 60 min ahead, at most 3 per line and variant. Each has
 `line`, `headsign`, `variant`, `vehicle`, `eta_s`, `at`, `delay_s`, `position_at`, `source`,
 `trip_id`, `scheduled`, `stops_away` and `distance_m`.

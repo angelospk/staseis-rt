@@ -2611,6 +2611,7 @@ components:
             name: {type: string}
             lat: {type: number}
             lon: {type: number}
+            code: {type: string, description: "Rev 21: the code on the stop sign (GTFS stop_code); missing when there is none."}
         lines:
           type: array
           items: {type: string}

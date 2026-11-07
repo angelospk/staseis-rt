@@ -25,7 +25,8 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
 
 ### Live API
 - An OASA Stop gets `code`, the code on the stop sign (GTFS `stop_code`, e.g. `040054` for
-  `oasa:40054`), so a client can show the number a rider sees on the pole (contract rev 21).
+  `oasa:40054`), also in the `stop` of `/v1/stops/{stop_id}`, so a client can show the number a
+  rider sees on the pole (contract rev 21).
 - The minute stats log adds `unmatched_why`: unmatched buses counted by line and reason, e.g.
   `87P:too_early=1`. Reasons: `no_shape`, `no_trip`, `off_route`, `too_early`, `too_late`,
   `backwards`, `taken` (#116). The API does not change.

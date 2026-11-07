@@ -37,6 +37,7 @@ type StopInfo struct {
 	Name string  `json:"name"`
 	Lat  float64 `json:"lat"`
 	Lon  float64 `json:"lon"`
+	Code string  `json:"code,omitempty"` // rev 21: the code on the stop sign (GTFS stop_code)
 }
 
 // StopArrival is a bus on its way to the stop (source "live") or a trip that has not left its
@@ -187,7 +188,7 @@ func (a *App) handleStop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	st := f.Stops[s]
-	writeJSON(w, http.StatusOK, stopMaxAge, StopResponse{Stop: StopInfo{st.ID, st.Name, st.Lat, st.Lon},
+	writeJSON(w, http.StatusOK, stopMaxAge, StopResponse{Stop: StopInfo{st.ID, st.Name, st.Lat, st.Lon, st.Code},
 		Lines: lines, Arrivals: arr, Usual: a.usualV1(wd, s, lines, now), UpdatedAt: now.Unix()})
 }
 

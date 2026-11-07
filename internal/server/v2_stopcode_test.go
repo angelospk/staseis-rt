@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/angelospk/athens-transit-rt/internal/telematics"
@@ -14,5 +15,10 @@ func TestV2StopCode(t *testing.T) {
 	v2get(t, a, "/v2/stops/"+esc("oasa:S3"), &s)
 	if s.Stop.Code != "10003" {
 		t.Fatalf("code %q, want 10003", s.Stop.Code)
+	}
+	_, body := get(t, a, "/v1/stops/S3")
+	var sr StopResponse
+	if err := json.Unmarshal(body, &sr); err != nil || sr.Stop.Code != "10003" {
+		t.Fatalf("/v1 code %q (%v)", sr.Stop.Code, err)
 	}
 }
