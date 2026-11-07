@@ -473,8 +473,8 @@ A line planned from OASA's daily schedule (`oasa_daily`) has one planned trip pe
 day's runs that leave before midnight, and the runs at 24:00 and later of the day before. The
 runs have no `trip_id`, so they are paired with the buses that ran: the matched rows of one
 vehicle on one GTFS trip whose shape ends where the run's direction does (by name, as the
-`seen` flags of the schedule) are one bus run, which left at its last fix within 300 m of the
-shape's start, or at its first fix when it was first seen further on. In time order, each run
+`seen` flags of the schedule) are one bus run, which left at its last fix within 300 m of its
+first stop, or at its first fix when it was first seen further on. In time order, each run
 takes the first unused bus that left from 5 min before to 30 min after it; a run without one is
 missed. The bus's coverage of its own trip's shape decides `run` or `partial`. A GTFS trip that
 matches both directions (a loop) pairs with neither. A direction with no GTFS shape of its own

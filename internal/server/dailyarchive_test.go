@@ -109,5 +109,19 @@ func TestDailyPlanFromTheArchive(t *testing.T) {
 			t.Fatalf("%s: plan = %+v, err %v", date, p, err)
 		}
 	}
+	// Today Go only, Come only as night runs of the day before: two directions, so not a loop,
+	// and the one EAST shape stays with Go (a loop would put it in both, measuring neither).
+	if err := writeDailyArchive(dir, &dailyArchive{Version: 1, Date: "2026-10-26", Lines: map[string]archivedDaily{
+		"L": {Descr: "WEST - EAST", Go: []string{"10:00"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDailyArchive(dir, &dailyArchive{Version: 1, Date: "2026-10-25", Lines: map[string]archivedDaily{
+		"L": {Descr: "WEST - EAST", Go: []string{"10:00"}, Come: []string{"24:05"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err = DailyPlan(f, "v", "2026-10-26", gtfs.Athens, dir)
+	if err != nil || len(p.Daily) != 2 || len(p.Daily[0].Trips) != 2 || len(p.Daily[1].Trips) != 0 {
+		t.Fatalf("night-only direction: %+v, err %v", p, err)
+	}
 	var _ stats.PlanFunc = func(date string) (*stats.Plan, error) { return DailyPlan(f, "v", date, gtfs.Athens, dir) }
 }

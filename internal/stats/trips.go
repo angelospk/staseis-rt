@@ -19,7 +19,7 @@ const (
 	// this late (DailyDir).
 	RunEarly = 5 * time.Minute
 	RunLate  = TripSlack
-	// RunNearM: a fix this close to the start of its trip's shape is a bus still at the stand.
+	// RunNearM: a fix this close to its trip's first stop (or before it) is a bus still at the stand.
 	RunNearM = 300.0
 
 	// The plan a line's trips come from (schedule_source); a day with both is SourceMixed.
@@ -60,7 +60,7 @@ type Span struct {
 // Dir is 0 for the Go runs, 1 for the Come runs.
 //
 // Match rule: the matched rows of one vehicle on one of the Trips are one bus run. It left at
-// its last fix within RunNearM of the start of the trip's shape, or at its first fix when it
+// its last fix within RunNearM of the trip's first stop, or at its first fix when it
 // has none (first seen mid-route). In time order, each run takes the first unused bus that left
 // from RunEarly before to RunLate after it; a run without one is missed. The bus's coverage of
 // its own trip's span decides run or partial, as for a GTFS trip. A trip in two directions (a

@@ -217,7 +217,7 @@ func dailyDirs(f *gtfs.Feed, cur, prev *dailyArchive, start, end time.Time) []st
 			}
 		}
 		shapes := lineShapes(f, line)
-		loop := d.Circular || len(shapes) == 1 && len(resp.Directions) == 1 // as markDailySeen
+		loop := d.Circular || len(shapes) == 1 && len(dirs) == 1 // as markDailySeen
 		for _, dir := range dirs {
 			ts := starts[dir.Direction]
 			if len(ts) == 0 {
