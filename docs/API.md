@@ -476,8 +476,9 @@ vehicle on one GTFS trip whose shape ends where the run's direction does (by nam
 `seen` flags of the schedule) are one bus run, which left at its last fix within 300 m of the
 shape's start, or at its first fix when it was first seen further on. In time order, each run
 takes the first unused bus that left from 5 min before to 30 min after it; a run without one is
-missed. The bus's coverage of its own trip's shape decides `run` or `partial`. A direction no
-GTFS shape matches has its runs `unmeasured`. A bus no run takes is not counted. The server
+missed. The bus's coverage of its own trip's shape decides `run` or `partial`. A GTFS trip that
+matches both directions (a loop) pairs with neither. A direction with no GTFS shape of its own
+has its runs without a bus `unmeasured`. A bus no run takes is not counted. The server
 keeps each day's daily schedules (all lines, about 20 KB gzip a day) under its state directory
 (`daily/YYYY-MM-DD.json.gz`), so the stats of a day can be written again later.
 

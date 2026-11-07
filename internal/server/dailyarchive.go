@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"time"
 
@@ -93,15 +94,18 @@ func writeDailyArchive(dir string, arch *dailyArchive) error {
 }
 
 // saveDailyArchive merges the cached daily schedules of today into today's archive: lines saved
-// before (a restart) stay, a line fetched again replaces its entry. changed is false when the
+// before (a restart) stay, a line fetched again replaces its entry unless the new one is partial
+// (a line code failed). changed is false when the
 // file already had them all.
 func (a *App) saveDailyArchive(today time.Time) (changed bool, err error) {
 	day := today.Format(time.DateOnly)
 	lines := map[string]archivedDaily{}
+	partial := map[string]bool{}
 	a.dailyMu.Lock()
 	for line, e := range a.dailyCache {
 		if e.day == day && e.ok {
 			lines[line] = archivedDaily{Descr: e.d.Descr, Circular: e.d.Circular, Go: e.d.Go, Come: e.d.Come}
+			partial[line] = e.partial
 		}
 	}
 	a.dailyMu.Unlock()
@@ -117,7 +121,11 @@ func (a *App) saveDailyArchive(today time.Time) (changed bool, err error) {
 		return false, err
 	}
 	for line, d := range lines {
-		if old, ok := arch.Lines[line]; !ok || !reflect.DeepEqual(old, d) {
+		old, ok := arch.Lines[line]
+		if ok && partial[line] {
+			continue // a line code failed: keep what was saved, it may be the full schedule
+		}
+		if !ok || !reflect.DeepEqual(old, d) {
 			arch.Lines[line], changed = d, true
 		}
 	}
@@ -158,18 +166,27 @@ func DailyPlan(f *gtfs.Feed, version, date string, loc *time.Location, dir strin
 }
 
 // dailyDirs turns the archives of a day (cur) and of the day before (prev) into the directions
-// of the lines of cur with runs that leave in [start, end).
+// of their lines with runs that leave in [start, end).
 func dailyDirs(f *gtfs.Feed, cur, prev *dailyArchive, start, end time.Time) []stats.DailyDir {
-	lines := make([]string, 0, len(cur.Lines))
-	for line := range cur.Lines {
-		lines = append(lines, line)
+	seen := map[string]bool{}
+	var lines []string
+	for _, arch := range []*dailyArchive{cur, prev} {
+		for line := range arch.Lines {
+			if !seen[line] {
+				seen[line] = true
+				lines = append(lines, line)
+			}
+		}
 	}
 	sort.Strings(lines)
 	m := match.New(f, nil, match.Greedy)
 	prevDay := start.AddDate(0, 0, -1)
 	var out []stats.DailyDir
 	for _, line := range lines {
-		d := cur.Lines[line]
+		d, ok := cur.Lines[line]
+		if !ok {
+			d = prev.Lines[line] // only night runs of the day before: its directions and names
+		}
 		resp := dailyToSchedule(line, "", toDaily(d))
 		starts := map[int][]int64{}
 		add := func(day time.Time, s ScheduleResponse, night bool) {
@@ -186,13 +203,22 @@ func dailyDirs(f *gtfs.Feed, cur, prev *dailyArchive, start, end time.Time) []st
 				}
 			}
 		}
-		add(start, resp, false)
+		if ok {
+			add(start, resp, false)
+		}
+		dirs := resp.Directions
 		if pd, ok := prev.Lines[line]; ok {
-			add(prevDay, dailyToSchedule(line, "", toDaily(pd)), true)
+			pr := dailyToSchedule(line, "", toDaily(pd))
+			add(prevDay, pr, true)
+			for _, pdir := range pr.Directions { // a direction with night runs only
+				if !slices.ContainsFunc(dirs, func(x ScheduleDirection) bool { return x.Direction == pdir.Direction }) {
+					dirs = append(dirs, pdir)
+				}
+			}
 		}
 		shapes := lineShapes(f, line)
 		loop := d.Circular || len(shapes) == 1 && len(resp.Directions) == 1 // as markDailySeen
-		for _, dir := range resp.Directions {
+		for _, dir := range dirs {
 			ts := starts[dir.Direction]
 			if len(ts) == 0 {
 				continue

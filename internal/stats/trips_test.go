@@ -297,3 +297,27 @@ func TestDailyRunsPairWithBusesInTimeOrder(t *testing.T) {
 		t.Fatalf("trips = %s", got)
 	}
 }
+
+// A GTFS trip in two directions (a loop whose Go and Come both match every shape) cannot tell
+// which run its bus did: it pairs with none, and a direction with no other usable trip is
+// unmeasured, not missed. Trips without a usable span do not make a direction measurable.
+func TestDailyAmbiguousOrShapelessTripsAreUnmeasured(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0), vrow(at(8, 2), "L", "a", "T1", 100, "g"), vrow(at(8, 20), "L", "a", "T1", 3900, "g"))
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{
+		{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix()}, Trips: map[string]Span{"T1": span}},
+		{Line: "L", Dir: 1, Starts: []int64{at(9, 0).Unix()}, Trips: map[string]Span{"T1": span}},
+		{Line: "N", Dir: 0, Starts: []int64{at(9, 0).Unix()}, Trips: map[string]Span{"U1": {}}},
+	})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Trips.Planned != 3 || d.Trips.Unmeasured != 3 {
+		got, _ := json.Marshal(d.Trips)
+		t.Fatalf("trips = %s", got)
+	}
+}

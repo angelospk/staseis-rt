@@ -46,6 +46,15 @@ func TestDailyArchiveSavesAndMerges(t *testing.T) {
 	if changed, err := a.saveDailyArchive(today); err != nil || changed {
 		t.Fatalf("second save: changed %v, err %v", changed, err)
 	}
+	// After a restart one line code failed: the partial schedule does not replace the full one.
+	a.dailyMu.Lock()
+	e := a.dailyCache["L"]
+	e.partial, e.d.Come = true, nil
+	a.dailyCache["L"] = e
+	a.dailyMu.Unlock()
+	if changed, err := a.saveDailyArchive(today); err != nil || changed {
+		t.Fatalf("partial save: changed %v, err %v", changed, err)
+	}
 	if _, err := loadDailyArchive(dir, "2026-10-06"); err == nil {
 		t.Fatal("an archive for a day never saved")
 	}
@@ -62,7 +71,8 @@ func TestDailyPlanFromTheArchive(t *testing.T) {
 		{Version: 1, Date: "2026-10-12", Lines: map[string]archivedDaily{
 			"L": {Descr: "WEST - EAST", Go: []string{"10:00", "10:40", "24:30"}, Come: []string{"11:00"}}}},
 		{Version: 1, Date: "2026-10-11", Lines: map[string]archivedDaily{
-			"L": {Descr: "WEST - EAST", Go: []string{"23:00", "25:15"}}}},
+			"L": {Descr: "WEST - EAST", Go: []string{"23:00", "25:15"}, Come: []string{"24:05"}},
+			"Z": {Descr: "P - Q", Go: []string{"24:20"}}}},
 		{Version: 1, Date: "2026-10-05", Lines: map[string]archivedDaily{
 			"L": {Descr: "WEST - EAST", Go: []string{"10:00"}}}},
 	} {
@@ -76,7 +86,7 @@ func TestDailyPlanFromTheArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.Expired || len(p.Trips) != 0 || len(p.Daily) != 2 {
+	if !p.Expired || len(p.Trips) != 0 || len(p.Daily) != 3 {
 		t.Fatalf("plan = %+v", p)
 	}
 	goDir, come := p.Daily[0], p.Daily[1]
@@ -86,8 +96,11 @@ func TestDailyPlanFromTheArchive(t *testing.T) {
 	if len(goDir.Trips) != 2 || goDir.Trips["T00"].ToM < 3450 || goDir.Trips["T00"].FromM > 1 {
 		t.Fatalf("go trips = %+v", goDir.Trips)
 	}
-	if come.Dir != 1 || !reflect.DeepEqual(come.Starts, []int64{at(12, 11, 0)}) || len(come.Trips) != 0 {
+	if come.Dir != 1 || !reflect.DeepEqual(come.Starts, []int64{at(12, 0, 5), at(12, 11, 0)}) || len(come.Trips) != 0 {
 		t.Fatalf("come = %+v", come) // no GTFS shape ends at WEST
+	}
+	if z := p.Daily[2]; z.Line != "Z" || !reflect.DeepEqual(z.Starts, []int64{at(12, 0, 20)}) {
+		t.Fatalf("night run of a line not in today's archive: %+v", z) // OASA has no runs of Z today
 	}
 
 	for _, date := range []string{"2026-10-05", "2026-10-19"} { // feed valid; no archive

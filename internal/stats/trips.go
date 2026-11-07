@@ -63,8 +63,9 @@ type Span struct {
 // its last fix within RunNearM of the start of the trip's shape, or at its first fix when it
 // has none (first seen mid-route). In time order, each run takes the first unused bus that left
 // from RunEarly before to RunLate after it; a run without one is missed. The bus's coverage of
-// its own trip's span decides run or partial, as for a GTFS trip. A direction with no Trips
-// (no GTFS shape ends where it does) has its runs unmeasured.
+// its own trip's span decides run or partial, as for a GTFS trip. A trip in two directions (a
+// loop) pairs with neither. A direction without a trip of its own with a usable span (no GTFS
+// shape ends where it does) has its runs without a bus unmeasured.
 type DailyDir struct {
 	Line   string          `json:"line"`
 	Dir    int             `json:"dir"`
@@ -210,8 +211,10 @@ func newTripCounter(plan *Plan) *tripCounter {
 	}
 	for i, d := range plan.Daily {
 		for id := range d.Trips {
-			if _, ok := c.dailyOf[id]; !ok {
+			if j, ok := c.dailyOf[id]; !ok {
 				c.dailyOf[id] = i
+			} else if j != i {
+				c.dailyOf[id] = -1 // in two directions: its bus could be either run
 			}
 		}
 	}
@@ -245,7 +248,7 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		}
 		c.state[k].note(sm, Span{pt.FromM, pt.ToM})
 	}
-	if d, ok := c.dailyOf[trip]; ok {
+	if d, ok := c.dailyOf[trip]; ok && d >= 0 {
 		k := busKey{d, veh, trip}
 		b := c.buses[k]
 		if b == nil {
@@ -266,6 +269,17 @@ func (c *tripCounter) stamp(gtfsVer string) {
 	if gtfsVer == c.plan.GTFS {
 		c.ours++
 	}
+}
+
+// measurable tells whether daily direction i has a trip of its own (in no other direction) with
+// a usable span: only then can a run without a bus be called missed.
+func (c *tripCounter) measurable(i int) bool {
+	for id, sp := range c.plan.Daily[i].Trips {
+		if c.dailyOf[id] == i && sp.ToM > sp.FromM {
+			return true
+		}
+	}
+	return false
 }
 
 // count adds one planned trip, seen as s on span sp, to l; missed names it.
@@ -326,8 +340,8 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 				}
 				break
 			}
-			if !s.any && len(d.Trips) > 0 {
-				sp = Span{0, 1} // no bus: missed, unless no shape could have measured it
+			if !s.any && c.measurable(i) {
+				sp = Span{0, 1} // no bus: missed, unless no trip could have measured it
 			}
 			l.count(s, sp, name+time.Unix(start, 0).In(loc).Format("15:04"))
 		}
