@@ -402,7 +402,7 @@ func TestTokenReadOnceAndRenewedOnceOn401(t *testing.T) {
 			fmt.Fprintf(w, "const token = '%s';", tok.Load())
 			return
 		}
-		if r.Header.Get("Authorization") != "Bearer "+tok.Load().(string) {
+		if strings.HasPrefix(r.URL.Path, "/denied") || r.Header.Get("Authorization") != "Bearer "+tok.Load().(string) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -465,6 +465,13 @@ func TestTokenReadOnceAndRenewedOnceOn401(t *testing.T) {
 	}
 	if st = c.statsNow(); st.Errors != 1 || !strings.HasSuffix(st.LastError, " HTTP 502") {
 		t.Fatalf("after 502: %+v", st)
+	}
+	// A 401 again after the new token is an error, counted once.
+	if _, err := c.get(context.Background(), "/denied", priBackground); err == nil {
+		t.Fatal("401 twice: no error")
+	}
+	if st = c.statsNow(); st.Errors != 2 || !strings.HasSuffix(st.LastError, " HTTP 401") {
+		t.Fatalf("after 401 twice: %+v", st)
 	}
 }
 

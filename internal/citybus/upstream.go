@@ -326,7 +326,7 @@ func (c *client) fetch(ctx context.Context, path string, pri Priority, retried b
 		return nil, err
 	}
 	body, status, err := c.do(ctx, c.rest+path, token)
-	bad := err != nil || (status != http.StatusOK && status != http.StatusNotFound && status != http.StatusUnauthorized)
+	bad := err != nil || (status != http.StatusOK && status != http.StatusNotFound && (status != http.StatusUnauthorized || retried))
 	c.count(status, err, bad)
 	switch {
 	case err != nil:
