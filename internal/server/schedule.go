@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -189,7 +190,19 @@ func (a *App) dailyVia(ctx context.Context, line string, today time.Time, get da
 	if a.dailyCache == nil {
 		a.dailyCache = map[string]dailyEntry{}
 	}
-	if old, ok := a.dailyCache[line]; !ok || old.day <= c.e.day { // never yesterday's over today's
+	switch old, ok := a.dailyCache[line]; {
+	case ok && old.day > c.e.day: // never yesterday's over today's
+	case ok && old.day == c.e.day && old.ok && (!c.e.ok || c.e.partial):
+		// OASA gave nothing (down, or no answer in time), or only part of it (a line code failed or
+		// came back empty): keep the runs the cache has (a partial schedule, or one restored from
+		// the archive), add the new ones, and ask again after the same pause.
+		old.retry = c.e.retry
+		if c.e.ok {
+			old.d.Go, old.d.Come = unionRuns(old.d.Go, c.e.d.Go), unionRuns(old.d.Come, c.e.d.Come)
+			old.d.Circular = old.d.Circular || c.e.d.Circular
+		}
+		a.dailyCache[line], c.e = old, old
+	default:
 		a.dailyCache[line] = c.e
 	}
 	delete(a.dailyCalls, line)
@@ -361,4 +374,11 @@ func (a *App) forgetSeen() {
 	a.seenMu.Lock()
 	a.seen, a.seenDay = map[string]bool{}, ""
 	a.seenMu.Unlock()
+}
+
+// unionRuns is the sorted departures of a and b, each once.
+func unionRuns(a, b []string) []string {
+	out := slices.Concat(a, b)
+	slices.Sort(out)
+	return slices.Compact(out)
 }

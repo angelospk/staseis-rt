@@ -135,6 +135,43 @@ func (a *App) saveDailyArchive(today time.Time) (changed bool, err error) {
 	return true, writeDailyArchive(dir, arch)
 }
 
+// restoreDaily puts the archive of the service day that runs now into the daily cache; it runs
+// at start, before the prefetch and the first plan build. A restart empties the cache, and with
+// an expired GTFS the planner then has no bus runs until the prefetch asks OASA again: after
+// midnight that is never, for the day still running (the prefetch waits for 03:00 and fetches
+// the next day). So before 03:00 the restored lines count as complete; during the day they stay
+// partial, and the prefetch asks OASA for each line as it did with an empty cache.
+func (a *App) restoreDaily() (int, error) {
+	now := a.now()
+	day := planNoon(now).Format(time.DateOnly)
+	arch, err := loadDailyArchive(a.dailyArchiveDir(), day)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	again := day == gtfs.Midnight(now).Format(time.DateOnly)
+	n := 0
+	a.dailyMu.Lock()
+	defer a.dailyMu.Unlock()
+	if a.dailyCache == nil {
+		a.dailyCache = map[string]dailyEntry{}
+	}
+	for line, d := range arch.Lines {
+		if len(d.Go)+len(d.Come) == 0 {
+			continue
+		}
+		if old, ok := a.dailyCache[line]; ok && old.day >= day && old.ok {
+			continue
+		}
+		a.dailyCache[line] = dailyEntry{day: day, ok: true, partial: again, retry: now,
+			d: telematics.DailySchedule{Descr: d.Descr, Circular: d.Circular, Go: d.Go, Come: d.Come}}
+		n++
+	}
+	return n, nil
+}
+
 // DailyPlan is the stats plan of a local day (stats.NewPlan). When the feed has expired for the
 // day and dir has the day's archive, its lines are planned from OASA's daily schedule instead
 // (stats.DailyDir): the runs of the day that leave before midnight, and the night runs (24:00

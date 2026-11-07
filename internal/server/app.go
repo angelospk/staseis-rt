@@ -752,6 +752,11 @@ func (a *App) Run(ctx context.Context) error {
 		go a.usualPasses(ctx)
 	}
 	if a.rail() {
+		if n, err := a.restoreDaily(); err != nil {
+			a.log.Warn("daily schedule: restore", "err", err)
+		} else if n > 0 {
+			a.log.Info("daily schedule: restored from the archive", "lines", n)
+		}
 		go a.prefetchDaily(ctx)
 	}
 	srv := &http.Server{Addr: a.cfg.Listen, Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second,
