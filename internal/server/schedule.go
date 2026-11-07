@@ -123,11 +123,12 @@ func (a *App) dailyEntryOf(line string, today time.Time) (dailyEntry, bool) {
 	day := today.Format(time.DateOnly)
 	a.dailyMu.Lock()
 	defer a.dailyMu.Unlock()
-	e, ok := a.dailyCache[line]
-	if !ok || e.day != day || !e.ok {
-		return dailyEntry{}, false
+	for _, m := range []map[string]dailyEntry{a.dailyCache, a.dailyPrev} {
+		if e, ok := m[line]; ok && e.day == day && e.ok {
+			return e, true
+		}
 	}
-	return e, true
+	return dailyEntry{}, false
 }
 
 // anyDailyCached tells whether today's daily schedule of some line is cached.
@@ -135,9 +136,11 @@ func (a *App) anyDailyCached(today time.Time) bool {
 	day := today.Format(time.DateOnly)
 	a.dailyMu.Lock()
 	defer a.dailyMu.Unlock()
-	for _, e := range a.dailyCache {
-		if e.day == day && e.ok {
-			return true
+	for _, m := range []map[string]dailyEntry{a.dailyCache, a.dailyPrev} {
+		for _, e := range m {
+			if e.day == day && e.ok {
+				return true
+			}
 		}
 	}
 	return false
@@ -190,6 +193,12 @@ func (a *App) dailyVia(ctx context.Context, line string, today time.Time, get da
 		a.dailyCache = map[string]dailyEntry{}
 	}
 	if old, ok := a.dailyCache[line]; !ok || old.day <= c.e.day { // never yesterday's over today's
+		if ok && old.ok && old.day < c.e.day {
+			if a.dailyPrev == nil {
+				a.dailyPrev = map[string]dailyEntry{}
+			}
+			a.dailyPrev[line] = old // the planner may still plan that day (before 03:00)
+		}
 		a.dailyCache[line] = c.e
 	}
 	delete(a.dailyCalls, line)
