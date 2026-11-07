@@ -190,6 +190,7 @@ type busKey struct {
 }
 
 type busRun struct {
+	key         busKey
 	seen        tripSeen
 	span        Span
 	first, near int64 // first fix; last fix near the start (0: none)
@@ -252,7 +253,7 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		k := busKey{d, veh, trip}
 		b := c.buses[k]
 		if b == nil {
-			b = &busRun{span: c.plan.Daily[d].Trips[trip], first: t}
+			b = &busRun{key: k, span: c.plan.Daily[d].Trips[trip], first: t}
 			c.buses[k] = b
 		}
 		b.first = min(b.first, t)
@@ -325,7 +326,16 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 	for i, d := range plan.Daily {
 		l := lineOf(d.Line, SourceDaily)
 		buses := byDir[i]
-		sort.Slice(buses, func(i, j int) bool { return buses[i].left() < buses[j].left() })
+		sort.Slice(buses, func(i, j int) bool { // the map's order is random: tie-break, so reruns agree
+			a, b := buses[i], buses[j]
+			if a.left() != b.left() {
+				return a.left() < b.left()
+			}
+			if a.key.veh != b.key.veh {
+				return a.key.veh < b.key.veh
+			}
+			return a.key.trip < b.key.trip
+		})
 		used := make([]bool, len(buses))
 		name := [...]string{"go ", "come "}[min(max(d.Dir, 0), 1)]
 		for _, start := range d.Starts {
