@@ -13,4 +13,4 @@ vehicles and travel speed per hour and per line, and how many scheduled trips ra
   2026-11-07 (no `start_delay`: it comes from OASA's daily schedule)
 
 Speed (km/h) = `dist_m / time_s * 3.6`. Fields and method: `docs/API.md` on `main`.
-Raw URL: `https://raw.githubusercontent.com/angelospk/athens-transit-rt/stats/v1/latest.json`
+Raw URL: `https://raw.githubusercontent.com/angelospk/staseis-rt/stats/v1/latest.json`
