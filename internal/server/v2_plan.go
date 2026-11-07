@@ -186,11 +186,13 @@ func (a *App) planKeyOf(noon time.Time) planKey {
 	}
 	day := noon.Format(time.DateOnly)
 	a.dailyMu.Lock()
-	for _, e := range a.dailyCache {
-		if e.day == day && e.ok {
-			k.daily++
-			if !e.partial {
-				k.full++
+	for _, m := range []map[string]dailyEntry{a.dailyCache, a.dailyPrev} {
+		for _, e := range m {
+			if e.day == day && e.ok {
+				k.daily++
+				if !e.partial {
+					k.full++
+				}
 			}
 		}
 	}

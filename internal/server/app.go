@@ -172,8 +172,11 @@ type App struct {
 
 	daily      dailyFunc  // a request waits: urgent scheduler slots, at most maxQueued
 	dailyBg    dailyFunc  // the prefetch: background slots, after the polls and the metadata
-	dailyMu    sync.Mutex // guards dailyCache only; never held during a request
+	dailyMu    sync.Mutex // guards dailyCache and dailyPrev only; never held during a request
 	dailyCache map[string]dailyEntry
+	// dailyPrev is the entry a newer day replaced in dailyCache: from 00:00 to 03:00 the planner
+	// still plans the day before, while /schedule fetches the calendar day (#128).
+	dailyPrev  map[string]dailyEntry
 	dailyCalls map[string]*dailyCall // fetches in flight, by line
 
 	stopArrivals func(ctx context.Context, stopCode string) ([]telematics.Arrival, error)
