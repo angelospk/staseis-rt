@@ -498,12 +498,17 @@ func TestSamePathInFlightIsOneRequest(t *testing.T) {
 
 func TestParseCities(t *testing.T) {
 	all, err := ParseCities("all")
-	if err != nil || len(all) != 28 || all[0] != "agrinio" || all[27] != "skiathos" || all[6] != "heraklion" {
+	if err != nil || len(all) != 28 || all[0] != "agq" || all[27] != "jsi" || all[6] != "her" {
 		t.Fatalf("all: %v %v", all, err)
 	}
-	two, err := ParseCities("patras, heraklion,patras")
-	if err != nil || fmt.Sprint(two) != "[patras heraklion]" {
+	two, err := ParseCities("pat, her,pat")
+	if err != nil || fmt.Sprint(two) != "[pat her]" {
 		t.Fatalf("list: %v %v", two, err)
+	}
+	// A slug still names its city (the staging unit's CITIES predates the codes).
+	slugs, err := ParseCities("patras,heraklion,her")
+	if err != nil || fmt.Sprint(slugs) != "[pat her]" {
+		t.Fatalf("slugs: %v %v", slugs, err)
 	}
 	if _, err := ParseCities("athens"); err == nil {
 		t.Fatal("athens is not a citybus city")
@@ -511,12 +516,61 @@ func TestParseCities(t *testing.T) {
 	if _, err := ParseCities(""); err == nil {
 		t.Fatal("empty list must fail")
 	}
-	seen := map[string]bool{}
+	seenID, seenSlug := map[string]bool{}, map[string]bool{}
 	for _, c := range Cities {
-		if seen[c.ID] || !regexp.MustCompile(`^[a-z]+$`).MatchString(c.ID) || c.Agency == 0 || c.Sub == "" {
+		if seenID[c.ID] || seenSlug[c.Slug] || !regexp.MustCompile(`^[a-z]{3}$`).MatchString(c.ID) ||
+			!regexp.MustCompile(`^[a-z]+$`).MatchString(c.Slug) || seenID[c.Slug] || seenSlug[c.ID] ||
+			c.Agency == 0 || c.Sub == "" {
 			t.Fatalf("bad conf %+v", c)
 		}
-		seen[c.ID] = true
+		seenID[c.ID], seenSlug[c.Slug] = true, true
+	}
+}
+
+// The city code: IATA where the city has its own airport, else three letters of the name
+// (Patras: GPA is Araxos, so pat). Harold, 2026-11-07.
+func TestCityCodes(t *testing.T) {
+	want := map[string]string{
+		"agrinio": "agq", "alexandroupoli": "axd", "arta": "art", "veroia": "ver", "volos": "vol",
+		"drama": "dra", "heraklion": "her", "ioannina": "ioa", "kavala": "kva", "kastoria": "kso",
+		"katerini": "kat", "corfu": "cfu", "kozani": "kzi", "komotini": "kom", "lamia": "lam",
+		"larissa": "lra", "mesologgi": "mes", "mitilini": "mjt", "naousa": "nao", "xanthi": "xan",
+		"patras": "pat", "ptolemaida": "pto", "serres": "ser", "chalkida": "cha", "chania": "chq",
+		"chios": "jkh", "salamina": "sal", "skiathos": "jsi",
+	}
+	if len(Cities) != len(want) {
+		t.Fatalf("%d cities, want %d", len(Cities), len(want))
+	}
+	for _, c := range Cities {
+		if want[c.Slug] != c.ID {
+			t.Fatalf("%s: code %q, want %q", c.Slug, c.ID, want[c.Slug])
+		}
+	}
+}
+
+// The state dir keeps the slug, so a code change does not reset line health.
+func TestStateDirIsSlug(t *testing.T) {
+	dir := t.TempDir()
+	c, err := newCity(Conf{ID: "her", Slug: "heraklion", Sub: "irakleio", Agency: 110, Name: "Ηράκλειο"}, &fake{}, dir, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.dir != filepath.Join(dir, "heraklion") {
+		t.Fatalf("dir %s", c.dir)
+	}
+}
+
+func TestCitiesListHasSlug(t *testing.T) {
+	c := testCity(t, &fake{answers: map[string]any{}}, t.TempDir())
+	c.Conf.ID, c.Conf.Slug = "her", "heraklion"
+	code, body := getBody(t, serviceWith(t, c), "/v1/cities")
+	list, _ := body["cities"].([]any)
+	if code != 200 || len(list) != 1 {
+		t.Fatalf("cities: %d %v", code, body)
+	}
+	row := list[0].(map[string]any)
+	if row["id"] != "her" || row["slug"] != "heraklion" {
+		t.Fatalf("row %v", row)
 	}
 }
 
