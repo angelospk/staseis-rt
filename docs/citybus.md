@@ -21,6 +21,9 @@ cities; `/` and `/{city}/debug` show the rotation state.
 - `/v2` ids are namespaced per city: `her:1235` (stop), `her:01` (line),
   `her:0932` (pattern), `her:run:<trip>:<YYYY-MM-DD>` (run). The bridge used `oasa:`.
 - `/v1` keeps bare codes, as in Athens.
+- `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
+  the city's current data (a sha256 of it, saved in `static.json`). A daily reload of the same data
+  keeps it, so the bot's alerts and the web's stop index (`trips-<city>.json`) stay valid.
 - A city's 3-letter code (`her`) is IATA where the city has its own airport, else three letters of
   the name. The slug (`heraklion`) stays for the web's `/{city}` paths and the state dir, so a code
   does not reset the state on disk.

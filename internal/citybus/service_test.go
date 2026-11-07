@@ -925,3 +925,75 @@ func TestConcurrentUserReadsShareOneRequest(t *testing.T) {
 		t.Fatalf("calls %d, callers without the board %d", calls.Load(), nils.Load())
 	}
 }
+
+// The static version (gtfs_version) names the first day the city's data looked like this: a daily
+// reload of the same data keeps it, so the bot's alerts and the web's stop index stay valid (rt#121).
+func TestStaticVersionChangesOnlyWithTheData(t *testing.T) {
+	dir := t.TempDir()
+	raw := lineRaw()
+	f := &fake{answers: answersOf(raw)}
+	c := testCity(t, f, dir)
+	day := time.Date(2026, 11, 7, 12, 0, 0, 0, athensLoc)
+	c.now = func() time.Time { return day }
+	ctx := context.Background()
+	version := func() (string, string) {
+		return c.status()["gtfs_version"].(string), c.staticLines()["gtfs_version"].(string)
+	}
+	if err := c.loadStatic(ctx, true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if s, l := version(); s != "2026-11-07" || l != s {
+		t.Fatalf("first load: status %q lines %q", s, l)
+	}
+	day = day.Add(24 * time.Hour)
+	if err := c.loadStatic(ctx, true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if s, l := version(); s != "2026-11-07" || l != s {
+		t.Fatalf("same data a day later: status %q lines %q, want 2026-11-07", s, l)
+	}
+	// A restart reads the version back from static.json.
+	c2 := testCity(t, &fake{hook: func(string) (any, bool, error) { return nil, true, nil }}, dir)
+	c2.now = func() time.Time { return day }
+	if err := c2.loadStatic(ctx, false, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if v := c2.status()["gtfs_version"]; v != "2026-11-07" {
+		t.Fatalf("after a restart: %q", v)
+	}
+	// A stop moves: a new version.
+	day = day.Add(24 * time.Hour)
+	raw.Stops[2].Latitude += 0.001
+	f.mu.Lock()
+	f.answers = answersOf(raw)
+	f.mu.Unlock()
+	if err := c.loadStatic(ctx, true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if s, l := version(); s != "2026-11-09" || l != s {
+		t.Fatalf("changed data: status %q lines %q, want 2026-11-09", s, l)
+	}
+}
+
+// A static.json from before the version was saved: its build day is its version, and a reload of
+// the same data keeps that day.
+func TestStaticVersionFromAnOldFile(t *testing.T) {
+	dir := t.TempDir()
+	raw := lineRaw()
+	raw.BuiltAt = time.Date(2026, 11, 6, 9, 0, 0, 0, athensLoc).Unix()
+	if err := os.MkdirAll(filepath.Join(dir, "t"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(raw)
+	if err := os.WriteFile(filepath.Join(dir, "t", "static.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := testCity(t, &fake{answers: answersOf(raw)}, dir)
+	c.now = func() time.Time { return time.Date(2026, 11, 8, 9, 0, 0, 0, athensLoc) }
+	if err := c.loadStatic(context.Background(), false, priWatched); err != nil { // over 24 h: reloads
+		t.Fatal(err)
+	}
+	if v := c.status()["gtfs_version"]; v != "2026-11-06" {
+		t.Fatalf("version %q, want 2026-11-06", v)
+	}
+}

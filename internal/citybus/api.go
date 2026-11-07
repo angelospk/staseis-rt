@@ -118,7 +118,7 @@ func (c *City) status() obj {
 	}
 	version := ""
 	if c.model != nil {
-		version = athensClock(c.model.BuiltAt).Date
+		version = c.model.Version
 	}
 	gap := c.up.pacer().gapNow()
 	return obj{"ok": c.model != nil, "gtfs_version": version, "gtfs_expires": "", "updated_at": now, "lines_active": len(lines),
@@ -150,7 +150,7 @@ func (c *City) staticLines() obj {
 	for _, l := range c.model.Lines {
 		lines = append(lines, obj{"id": l.Code, "name": l.Name, "name_en": "", "color": l.Color, "text_color": l.TextColor, "kind": "bus"})
 	}
-	return obj{"gtfs_version": athensClock(c.model.BuiltAt).Date, "lines": lines}
+	return obj{"gtfs_version": c.model.Version, "lines": lines}
 }
 
 func (c *City) staticLine(code string) obj {

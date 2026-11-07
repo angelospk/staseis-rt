@@ -2,6 +2,8 @@ package citybus
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -259,6 +261,15 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 	}
 	if missing*10 > routes {
 		return fmt.Errorf("%d of %d routes without a stop order from citybus.gr", missing, routes)
+	}
+	raw.Hash, raw.Version = contentHash(raw), athensClock(raw.BuiltAt).Date
+	if prevHash := prev.Hash; prev.version() != "" {
+		if prevHash == "" { // a file from before the hash was saved
+			prevHash = contentHash(prev)
+		}
+		if prevHash == raw.Hash {
+			raw.Version = prev.version()
+		}
 	}
 	b, err := json.Marshal(raw)
 	if err != nil {
@@ -649,4 +660,30 @@ func (c *City) freshBoard(code string) *Board {
 	case <-t.C:
 	}
 	return cached
+}
+
+// contentHash: sha256 of everything the model is built from (not BuiltAt, Version, Hash). Written
+// part by part, map keys in order, so no copy of the whole city is held in memory.
+func contentHash(raw *RawCity) string {
+	h := sha256.New()
+	enc := json.NewEncoder(h)
+	_ = enc.Encode(raw.Lines)
+	_ = enc.Encode(raw.Stops)
+	hashMap(enc, raw.Sequences)
+	hashMap(enc, raw.Points)
+	hashMap(enc, raw.Trips)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func hashMap[T any](enc *json.Encoder, m map[string]T) {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		_ = enc.Encode(k)
+		_ = enc.Encode(m[k])
+	}
+	_ = enc.Encode("|")
 }

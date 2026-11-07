@@ -107,6 +107,21 @@ type RawCity struct {
 	Points    map[string][]RawPoints  `json:"points"`    // lineCode -> shapes per route
 	Trips     map[string][]RawTripRow `json:"trips"`     // routeCode -> rows
 	BuiltAt   int64                   `json:"builtAt"`   // unix s
+	// Version: the Athens day of the first build with this data (Hash), so a daily reload of the
+	// same data keeps it. Files from before it was saved have neither (see version).
+	Version string `json:"version,omitempty"`
+	Hash    string `json:"hash,omitempty"`
+}
+
+// version is the city's gtfs_version: Version, or for an older file the day it was built.
+func (r *RawCity) version() string {
+	if r.Version != "" {
+		return r.Version
+	}
+	if r.BuiltAt == 0 {
+		return ""
+	}
+	return athensClock(r.BuiltAt).Date
 }
 
 // LiveRow is one bus on a stop board (stops/live/{code}).
@@ -167,6 +182,7 @@ type Model struct {
 	Stops      map[string]*Stop
 	Routes     map[string]*Route
 	BuiltAt    int64
+	Version    string // gtfs_version (RawCity.version)
 }
 
 // ---- live ----
