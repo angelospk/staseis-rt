@@ -14,12 +14,14 @@ Source of truth: `athens-transit-rt/docs/CONTRACT.md`. The frontend keeps a copy
   frontend repo by whoever made it (backend thread opens the copy as a commit or
   issue on the frontend repo).
 
-Revision: 20 (2026-11-07): vehicles of `/v1/lines/{line_id}`, `/v1/vehicles` and its `z` 13 tiles
+Revision: 21 (2026-11-07): an OASA Stop gets `code`, the code on the stop sign (GTFS
+`stop_code`, e.g. `040054` for `oasa:40054`); missing when the source has none
+(rev 20: vehicles of `/v1/lines/{line_id}`, `/v1/vehicles` and its `z` 13 tiles
 get `along_m`, their metres along the static shape of their `variant`, and each variant of
 `static/v1/lines/{line_id}.json` gets `length_m`, so a client can move a marker along the whole
 shape instead of stopping at the end of `path_beyond`
-([client rule](#along-the-static-shape-rev-20))
-(rev 19: `/v2/stops/{id}` and `/v1/stops/{stop_id}` get `usual`, the usual
+([client rule](#along-the-static-shape-rev-20));
+rev 19: `/v2/stops/{id}` and `/v1/stops/{stop_id}` get `usual`, the usual
 service of each OASA line and headsign at the stop, learnt from the past weeks;
 rev 18: `GET /v2/municipal`, the municipal bus routes and stops of OpenStreetMap;
 rev 17: the daily statistics files (`/v1/stats/days/{date}`, the `stats`
@@ -548,6 +550,9 @@ and compare them; they never parse them.
 - `modes`: the modes of `lines`, sorted; a bus stop can be `["bus","trolley"]`.
 - `lines`: Line ids that call here, sorted by mode then label/name.
 - `name_en`: `null` when unknown (OASA has it for most stops; STASY and railway.gov.gr do).
+- `code` (rev 21): the code on the stop sign, GTFS `stop_code` (`oasa:40054` is `040054`, and a
+  few terminals have short codes such as `18`). Only OASA Stops have it; the field is missing
+  otherwise.
 
 #### Vehicle
 

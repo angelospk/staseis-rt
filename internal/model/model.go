@@ -83,6 +83,7 @@ type Stop struct {
 	ID     string   `json:"id"`
 	Name   string   `json:"name"`
 	NameEn *string  `json:"name_en"`
+	Code   string   `json:"code,omitempty"` // rev 21: the code on the stop sign (GTFS stop_code); OASA only
 	Lat    float64  `json:"lat"`
 	Lon    float64  `json:"lon"`
 	Modes  []string `json:"modes"`

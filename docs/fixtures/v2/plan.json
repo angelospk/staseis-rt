@@ -236,6 +236,7 @@
       "id": "oasa:S0",
       "name": "STOP 0",
       "name_en": null,
+      "code": "10000",
       "lat": 37.98,
       "lon": 23.7,
       "modes": [
@@ -250,6 +251,7 @@
       "id": "oasa:S3",
       "name": "STOP 3",
       "name_en": null,
+      "code": "10003",
       "lat": 37.98,
       "lon": 23.73,
       "modes": [

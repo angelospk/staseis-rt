@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: staseis-rt
-  version: "1 (contract rev 20)"
+  version: "1 (contract rev 21)"
   summary: Live positions and GTFS-Realtime for OASA buses and trolleys in Athens.
   description: |
     Free public API, no key. Live data comes from `https://transit.haroldpoi.dev`; the static map
@@ -2795,6 +2795,11 @@ components:
         name_en:
           type: [string, "null"]
           description: "`null` when the Source has no English name."
+        code:
+          type: string
+          description: |
+            Rev 21: the code on the stop sign (GTFS `stop_code`), e.g. `040054` for `oasa:40054`.
+            OASA Stops only; missing otherwise.
         lat:
           type: number
           minimum: -90

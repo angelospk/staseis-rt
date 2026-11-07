@@ -180,7 +180,7 @@ func (o *oasaAdapter) stopModel(w *world, i int32) model.Stop {
 	modes := w.lineModes()
 	lines := append([]string(nil), w.stopLines[i]...)
 	sortLines(lines, func(l string) (string, string) { return modes[l], l })
-	out := model.Stop{ID: oasaPrefix + st.ID, Name: st.Name, Lat: round5(st.Lat), Lon: round5(st.Lon),
+	out := model.Stop{ID: oasaPrefix + st.ID, Name: st.Name, Code: st.Code, Lat: round5(st.Lat), Lon: round5(st.Lon),
 		Modes: []string{}, Lines: make([]string, len(lines)), Source: oasaNS}
 	seen := map[string]bool{}
 	for k, l := range lines {
