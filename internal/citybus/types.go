@@ -1,5 +1,5 @@
 // Package citybus serves the atrt API for the cities on citybus.gr (e-analysis), all in one
-// process, one path prefix per city: /heraklion/v2/lines ... It is the Go port of the
+// process, one path prefix per city: /her/v2/lines ... It is the Go port of the
 // citybus-bridge prototype (Bun/TS, mini PC; report: athens-transit-map
 // docs/research/citybus-prototype.md).
 //

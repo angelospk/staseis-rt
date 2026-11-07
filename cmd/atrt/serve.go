@@ -40,7 +40,7 @@ func serve(args []string) error {
 	histMB := fs.Int64("history-max-mb", 500, "fix history: delete the oldest hours above this size")
 	histDays := fs.Int("history-days", 30, "fix history: delete hours older than this")
 	cityID := fs.String("city", "athens", "athens, thessaloniki or citybus")
-	cities := fs.String("cities", "all", "citybus only: \"all\" or ids separated by commas (agrinio,heraklion,...)")
+	cities := fs.String("cities", "all", "citybus only: \"all\" or codes/names separated by commas (agq,her,...)")
 	fs.Parse(args)
 
 	if *cityID == "citybus" {

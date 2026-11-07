@@ -70,7 +70,7 @@ func testCity(t *testing.T, f *fake, dir string) *City {
 	if f.p == nil {
 		f.p = newPacer(time.Second)
 	}
-	c, err := newCity(Conf{ID: "t", Sub: "t", Agency: 1, Name: "T"}, f, dir, quiet)
+	c, err := newCity(Conf{ID: "t", Slug: "t", Sub: "t", Agency: 1, Name: "T"}, f, dir, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}

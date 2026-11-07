@@ -10,7 +10,7 @@ import (
 )
 
 // The answers, in the atrt contract shapes (docs/CONTRACT.md: /v1 tiles, lines, stops; /v2), as
-// the bridge gave them. /v2 ids are namespaced per city: heraklion:1235, heraklion:run:<trip>:<date>.
+// the bridge gave them. /v2 ids are namespaced per city: her:1235, her:run:<trip>:<date>.
 
 type obj = map[string]any
 

@@ -26,42 +26,44 @@ var idleWait = 30 * time.Second
 
 // Conf is one citybus.gr site.
 type Conf struct {
-	ID     string `json:"id"`     // the path prefix and the id namespace: /heraklion/..., heraklion:1235
+	ID     string `json:"id"`     // the code: the path prefix and the id namespace: /her/..., her:1235
+	Slug   string `json:"slug"`   // the long name: the web's /{city} paths and the state dir
 	Sub    string `json:"sub"`    // the citybus.gr subdomain
 	Agency int    `json:"agency"` // the agency code of the REST paths
 	Name   string `json:"name"`
 }
 
-// Cities: every non-empty citybus.gr site, in the order of the citybus.gr index page.
+// Cities: every non-empty citybus.gr site, in the order of the citybus.gr index page. The code is
+// IATA where the city has its own airport, else three letters of the name.
 var Cities = []Conf{
-	{"agrinio", "agrinio", 130, "Αγρίνιο"},
-	{"alexandroupoli", "alexandroupoli", 107, "Αλεξανδρούπολη"},
-	{"arta", "arta", 125, "Άρτα"},
-	{"veroia", "veroia", 129, "Βέροια"},
-	{"volos", "volos", 103, "Βόλος"},
-	{"drama", "drama", 134, "Δράμα"},
-	{"heraklion", "irakleio", 110, "Ηράκλειο"},
-	{"ioannina", "ioannina", 106, "Ιωάννινα"},
-	{"kavala", "kavala", 123, "Καβάλα"},
-	{"kastoria", "kastoria", 115, "Καστοριά"},
-	{"katerini", "katerini", 118, "Κατερίνη"},
-	{"corfu", "corfu", 101, "Κέρκυρα"},
-	{"kozani", "kozani", 121, "Κοζάνη"},
-	{"komotini", "komotini", 105, "Κομοτηνή"},
-	{"lamia", "lamia", 114, "Λαμία"},
-	{"larissa", "larisa", 102, "Λάρισα"},
-	{"mesologgi", "mesologgi", 109, "Μεσολόγγι"},
-	{"mitilini", "mitilini", 122, "Μυτιλήνη"},
-	{"naousa", "naousa", 116, "Νάουσα"},
-	{"xanthi", "xanthi", 104, "Ξάνθη"},
-	{"patras", "patra", 112, "Πάτρα"},
-	{"ptolemaida", "ptolemaida", 128, "Πτολεμαΐδα"},
-	{"serres", "serres", 117, "Σέρρες"},
-	{"chalkida", "chalkida", 133, "Χαλκίδα"},
-	{"chania", "chania", 120, "Χανιά"},
-	{"chios", "chios", 127, "Χίος"},
-	{"salamina", "salamina", 113, "Σαλαμίνα"},
-	{"skiathos", "skiathos", 135, "Σκιάθος"},
+	{"agq", "agrinio", "agrinio", 130, "Αγρίνιο"},
+	{"axd", "alexandroupoli", "alexandroupoli", 107, "Αλεξανδρούπολη"},
+	{"art", "arta", "arta", 125, "Άρτα"},
+	{"ver", "veroia", "veroia", 129, "Βέροια"},
+	{"vol", "volos", "volos", 103, "Βόλος"},
+	{"dra", "drama", "drama", 134, "Δράμα"},
+	{"her", "heraklion", "irakleio", 110, "Ηράκλειο"},
+	{"ioa", "ioannina", "ioannina", 106, "Ιωάννινα"},
+	{"kva", "kavala", "kavala", 123, "Καβάλα"},
+	{"kso", "kastoria", "kastoria", 115, "Καστοριά"},
+	{"kat", "katerini", "katerini", 118, "Κατερίνη"},
+	{"cfu", "corfu", "corfu", 101, "Κέρκυρα"},
+	{"kzi", "kozani", "kozani", 121, "Κοζάνη"},
+	{"kom", "komotini", "komotini", 105, "Κομοτηνή"},
+	{"lam", "lamia", "lamia", 114, "Λαμία"},
+	{"lra", "larissa", "larisa", 102, "Λάρισα"},
+	{"mes", "mesologgi", "mesologgi", 109, "Μεσολόγγι"},
+	{"mjt", "mitilini", "mitilini", 122, "Μυτιλήνη"},
+	{"nao", "naousa", "naousa", 116, "Νάουσα"},
+	{"xan", "xanthi", "xanthi", 104, "Ξάνθη"},
+	{"pat", "patras", "patra", 112, "Πάτρα"},
+	{"pto", "ptolemaida", "ptolemaida", 128, "Πτολεμαΐδα"},
+	{"ser", "serres", "serres", 117, "Σέρρες"},
+	{"cha", "chalkida", "chalkida", 133, "Χαλκίδα"},
+	{"chq", "chania", "chania", 120, "Χανιά"},
+	{"jkh", "chios", "chios", 127, "Χίος"},
+	{"sal", "salamina", "salamina", 113, "Σαλαμίνα"},
+	{"jsi", "skiathos", "skiathos", 135, "Σκιάθος"},
 }
 
 type cycleStats struct {
@@ -103,7 +105,7 @@ type City struct {
 }
 
 func newCity(conf Conf, up fetcher, stateDir string, log *slog.Logger) (*City, error) {
-	dir := filepath.Join(stateDir, conf.ID)
+	dir := filepath.Join(stateDir, conf.Slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}

@@ -22,7 +22,8 @@ type Config struct {
 	Cities   []string // ids of Cities, in any order; served in the order of Cities
 }
 
-// ParseCities reads --cities: "all", or ids separated by commas.
+// ParseCities reads --cities: "all", or codes or slugs separated by commas. The output is always
+// the codes, deduplicated after mapping.
 func ParseCities(s string) ([]string, error) {
 	s = strings.TrimSpace(s)
 	if s == "all" {
@@ -34,16 +35,20 @@ func ParseCities(s string) ([]string, error) {
 	}
 	var out []string
 	seen := map[string]bool{}
-	for _, id := range strings.Split(s, ",") {
-		id = strings.TrimSpace(id)
-		if id == "" || seen[id] {
+	for _, x := range strings.Split(s, ",") {
+		x = strings.TrimSpace(x)
+		if x == "" {
 			continue
 		}
-		if _, ok := confOf(id); !ok {
-			return nil, fmt.Errorf("unknown citybus city %q", id)
+		conf, ok := confOf(x)
+		if !ok {
+			return nil, fmt.Errorf("unknown citybus city %q", x)
 		}
-		seen[id] = true
-		out = append(out, id)
+		if seen[conf.ID] {
+			continue
+		}
+		seen[conf.ID] = true
+		out = append(out, conf.ID)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no citybus city given (--cities all or a list)")
@@ -51,9 +56,10 @@ func ParseCities(s string) ([]string, error) {
 	return out, nil
 }
 
+// confOf: a city by its code or its slug.
 func confOf(id string) (Conf, bool) {
 	for _, c := range Cities {
-		if c.ID == id {
+		if c.ID == id || c.Slug == id {
 			return c, true
 		}
 	}
@@ -172,7 +178,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if path == "/v1/cities" {
 		var list []obj
 		for _, c := range s.order {
-			list = append(list, obj{"id": c.Conf.ID, "name": c.Conf.Name, "ready": c.ready()})
+			list = append(list, obj{"id": c.Conf.ID, "slug": c.Conf.Slug, "name": c.Conf.Name, "ready": c.ready()})
 		}
 		writeJSON(w, obj{"cities": list}, http.StatusOK, 60)
 		return

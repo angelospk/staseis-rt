@@ -6,7 +6,7 @@ port of the `citybus-bridge` prototype (Bun/TS, mini PC; report: athens-transit-
 
 ```sh
 atrt serve --city citybus --cities all --listen 127.0.0.1:8103 --state ~/.local/state/atrt-citybus
-atrt serve --city citybus --cities agrinio,heraklion ...   # a subset
+atrt serve --city citybus --cities pat,her ...   # a subset
 ```
 
 ## API
@@ -18,13 +18,15 @@ The same shapes as the bridge (the atrt contract): `/{city}/v1/status`, `/{city}
 `/{city}/static/v1/lines.json`, `/{city}/static/v1/lines/{code}.json`. `/v1/cities` lists the enabled
 cities; `/` and `/{city}/debug` show the rotation state.
 
-- `/v2` ids are namespaced per city: `heraklion:1235` (stop), `heraklion:01` (line),
-  `heraklion:0932` (pattern), `heraklion:run:<trip>:<YYYY-MM-DD>` (run). The bridge used `oasa:`.
+- `/v2` ids are namespaced per city: `her:1235` (stop), `her:01` (line),
+  `her:0932` (pattern), `her:run:<trip>:<YYYY-MM-DD>` (run). The bridge used `oasa:`.
 - `/v1` keeps bare codes, as in Athens.
-- City ids, in the order of the citybus.gr index: agrinio, alexandroupoli, arta, veroia, volos,
-  drama, heraklion, ioannina, kavala, kastoria, katerini, corfu, kozani, komotini, lamia, larissa,
-  mesologgi, mitilini, naousa, xanthi, patras, ptolemaida, serres, chalkida, chania, chios,
-  salamina, skiathos (`citybus.Cities`).
+- A city's 3-letter code (`her`) is IATA where the city has its own airport, else three letters of
+  the name. The slug (`heraklion`) stays for the web's `/{city}` paths and the state dir, so a code
+  does not reset the state on disk.
+- City codes, in the order of the citybus.gr index: agq, axd, art, ver, vol, dra, her, ioa, kva,
+  kso, kat, cfu, kzi, kom, lam, lra, mes, mjt, nao, xan, pat, pto, ser, cha, chq, jkh, sal, jsi
+  (`citybus.Cities`).
 
 ## Load on citybus.gr
 
