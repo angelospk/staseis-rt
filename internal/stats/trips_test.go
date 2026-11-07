@@ -121,11 +121,11 @@ func TestComputeCountsTripsByCoverage(t *testing.T) {
 	if d.Fixes != 7 || d.Files != 6 {
 		t.Fatalf("fixes = %d, files = %d", d.Fixes, d.Files)
 	}
-	want := &Trips{GTFS: "g", GTFSExpired: true, MinCoverage: MinCoverage,
+	want := &Trips{GTFS: "g", GTFSExpired: true, ScheduleSource: SourceGTFS, MinCoverage: MinCoverage,
 		TripCount: TripCount{Planned: 5, Run: 1, Partial: 1, Missed: 2, Unmeasured: 1},
 		ByLine: []TripLine{
-			{Line: "L", TripCount: TripCount{Planned: 4, Run: 1, Partial: 1, Missed: 1, Unmeasured: 1}, MissedTrips: []string{"C"}},
-			{Line: "M", TripCount: TripCount{Planned: 1, Missed: 1}, MissedTrips: []string{"E"}},
+			{Line: "L", ScheduleSource: SourceGTFS, TripCount: TripCount{Planned: 4, Run: 1, Partial: 1, Missed: 1, Unmeasured: 1}, MissedTrips: []string{"C"}},
+			{Line: "M", ScheduleSource: SourceGTFS, TripCount: TripCount{Planned: 1, Missed: 1}, MissedTrips: []string{"E"}},
 		}}
 	if !reflect.DeepEqual(d.Trips, want) {
 		got, _ := json.Marshal(d.Trips)
@@ -213,5 +213,87 @@ func TestComputeTripsOfADayWithNoMatchedRow(t *testing.T) {
 	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
 	if err != nil || d.Trips == nil || d.Trips.Planned != 1 || d.Trips.Missed != 1 {
 		t.Fatalf("trips = %+v, err %v", d.Trips, err)
+	}
+}
+
+// vrow is a matched history row of vehicle veh on GTFS trip at sm metres along its shape.
+func vrow(at time.Time, line, veh, trip string, sm int, gtfsVer string) string {
+	return fmt.Sprintf("%d,%s,R,%s,37980000,23700000,%s,%s,SH,%d,0\n", at.Unix(), line, veh, gtfsVer, trip, sm)
+}
+
+// The winter timetable of OASA's daily schedule differs from the summer GTFS: line L leaves at
+// 10:00 and 10:40 (the GTFS has 10:20 and 11:00). The bus the matcher put on the GTFS trip of
+// 10:20 left at 10:41: it ran the 10:40 departure, which the GTFS lacks. The GTFS trip of 11:00,
+// which OASA no longer schedules, is not missed: it is not planned at all.
+func TestComputeCountsTheDailyScheduleRuns(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(10, 0),
+		vrow(at(10, 30), "L", "v1", "S1020", 50, "g"),  // waiting at the stand
+		vrow(at(10, 41), "L", "v1", "S1020", 200, "g"), // the last fix near the start: it leaves
+		vrow(at(10, 50), "L", "v1", "S1020", 2500, "g"),
+		vrow(at(10, 55), "L", "v2", "M1", 3000, "g"), // line M keeps its GTFS plan
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{
+		{ID: "S1020", Line: "L", Start: at(10, 20).Unix(), End: at(10, 45).Unix(), ToM: 4000},
+		{ID: "S1100", Line: "L", Start: at(11, 0).Unix(), End: at(11, 25).Unix(), ToM: 4000},
+		{ID: "M1", Line: "M", Start: at(10, 30).Unix(), End: at(11, 0).Unix(), ToM: 4000},
+	}}
+	plan.UseDaily([]DailyDir{{Line: "L", Dir: 0, Starts: []int64{at(10, 0).Unix(), at(10, 40).Unix()},
+		Trips: map[string]Span{"S1020": {0, 4000}, "S1100": {0, 4000}}}})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &Trips{GTFS: "g", GTFSExpired: true, ScheduleSource: SourceMixed, MinCoverage: MinCoverage,
+		TripCount: TripCount{Planned: 3, Run: 1, Partial: 1, Missed: 1},
+		ByLine: []TripLine{
+			{Line: "L", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 2, Run: 1, Missed: 1}, MissedTrips: []string{"go 10:00"}},
+			{Line: "M", ScheduleSource: SourceGTFS, TripCount: TripCount{Planned: 1, Partial: 1}},
+		}}
+	if !reflect.DeepEqual(d.Trips, want) {
+		got, _ := json.Marshal(d.Trips)
+		t.Fatalf("trips = %s", got)
+	}
+}
+
+// Pairing: each run takes, in time order, the first unused bus that left from RunEarly before to
+// RunLate after it; a bus seen only mid-route left at its first fix. Runs of a direction without
+// any GTFS shape are unmeasured; a run whose bus has no usable shape too.
+func TestDailyRunsPairWithBusesInTimeOrder(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 2), "L", "a", "T1", 100, "g"), // left 08:02: the 08:00 run
+		vrow(at(8, 20), "L", "a", "T1", 3900, "g"),
+		vrow(at(8, 25), "L", "b", "T2", 2000, "g"), // first seen mid-route at 08:25: the 08:10 run (late)
+		vrow(at(8, 35), "L", "b", "T2", 2100, "g"), // covers little: partial
+		vrow(at(8, 51), "L", "c", "T3", 100, "g"),  // 08:51 is past RunLate of 08:20: not the 08:20 run
+		vrow(at(9, 5), "L", "c", "T3", 3900, "g"),
+		vrow(at(8, 30), "L", "d", "X9", 100, "g"), // a trip of no daily direction: ignored
+		vrow(at(8, 40), "L", "d", "X9", 3900, "g"),
+		vrow(at(8, 40), "N", "e", "U1", 100, "g"), // a bus on a trip without a shape
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{
+		{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(8, 10).Unix(), at(8, 20).Unix()},
+			Trips: map[string]Span{"T1": span, "T2": span, "T3": span}},
+		{Line: "L", Dir: 1, Starts: []int64{at(9, 0).Unix()}}, // no shape matches this direction
+		{Line: "N", Dir: 0, Starts: []int64{at(8, 40).Unix()}, Trips: map[string]Span{"U1": {}}},
+	})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &Trips{GTFS: "g", GTFSExpired: true, ScheduleSource: SourceDaily, MinCoverage: MinCoverage,
+		TripCount: TripCount{Planned: 5, Run: 1, Partial: 1, Missed: 1, Unmeasured: 2},
+		ByLine: []TripLine{
+			{Line: "L", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 4, Run: 1, Partial: 1, Missed: 1, Unmeasured: 1}, MissedTrips: []string{"go 08:20"}},
+			{Line: "N", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 1, Unmeasured: 1}},
+		}}
+	if !reflect.DeepEqual(d.Trips, want) {
+		got, _ := json.Marshal(d.Trips)
+		t.Fatalf("trips = %s", got)
 	}
 }

@@ -9,7 +9,8 @@ import (
 
 // prefetchDaily fetches OASA's daily timetable of every line once a day, from 03:00 (after the
 // night runs), through background slots: a stop with many lines then finds them all cached. A
-// line that failed is asked again on demand (dailyNegativeTTL), not by the next round.
+// line that failed is asked again on demand (dailyNegativeTTL), not by the next round. Once the
+// day is fetched, every round saves what the cache has of it to the archive (saveDailyArchive).
 func (a *App) prefetchDaily(ctx context.Context) {
 	tick := time.NewTicker(10 * time.Minute)
 	defer tick.Stop()
@@ -23,6 +24,11 @@ func (a *App) prefetchDaily(ctx context.Context) {
 				done = day
 				a.prefetched.Store(day)
 				a.log.Info("daily schedule: prefetched", "lines", len(a.meta.LineIDs()), "took", time.Since(start).Round(time.Second))
+			}
+		}
+		if day == done {
+			if _, err := a.saveDailyArchive(gtfs.Midnight(now)); err != nil {
+				a.log.Warn("daily schedule: archive", "err", err)
 			}
 		}
 		select {

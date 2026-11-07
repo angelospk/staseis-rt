@@ -456,10 +456,11 @@ hour repeated when clocks go back, both hours are summed into one entry.
 | Field | Meaning |
 |---|---|
 | `gtfs` | the static GTFS version (`gtfs_version` of `/v1/status`) the trips come from |
-| `gtfs_expired` | `true` when the day is outside that feed's validity: the planned trips are those of the same weekday inside it, so they may not be the timetable OASA really ran |
+| `gtfs_expired` | `true` when the day is outside that feed's validity. The lines with an archived OASA daily schedule of the day are then planned from it (`schedule_source`); the others take the trips of the same weekday inside the feed, which may not be the timetable OASA really ran |
+| `schedule_source` | where the planned trips come from: `oasa_daily` (OASA's daily schedule of the day), `gtfs`, or `mixed` (some lines each). Missing on days written before 2026-11 (they are `gtfs`) |
 | `min_coverage` | share of a trip's route a vehicle must cover for the trip to count as run (0.5) |
 | `planned`, `run`, `partial`, `missed`, `unmeasured` | trips the day planned, and how they split: covered at least `min_coverage`; seen but covered less; never seen; no usable shape, so not measured (`run + partial + missed + unmeasured = planned`) |
-| `by_line[]` | every line with a planned trip: `line`, the same five counts, `missed_trips` (GTFS `trip_id`s never seen, by start time; `null` when none) |
+| `by_line[]` | every line with a planned trip: `line`, `schedule_source` (`oasa_daily` or `gtfs`), the same five counts, `missed_trips` (by start time; `null` when none): GTFS `trip_id`s on a `gtfs` line, and `go HH:MM` / `come HH:MM` (local departure time of OASA's Go or Come run) on an `oasa_daily` line |
 
 A day plans every trip whose scheduled start falls in it (a trip at 24:10 of Monday's service
 counts for Tuesday). A history row counts for a trip when the matcher assigned the vehicle to
@@ -468,11 +469,25 @@ its scheduled end. Coverage is the distance along the shape between the first an
 those rows, divided by the shape length between the trip's first and last stop. Share of trips
 run = `run / (planned - unmeasured)`.
 
+A line planned from OASA's daily schedule (`oasa_daily`) has one planned trip per run: the
+day's runs that leave before midnight, and the runs at 24:00 and later of the day before. The
+runs have no `trip_id`, so they are paired with the buses that ran: the matched rows of one
+vehicle on one GTFS trip whose shape ends where the run's direction does (by name, as the
+`seen` flags of the schedule) are one bus run, which left at its last fix within 300 m of the
+shape's start, or at its first fix when it was first seen further on. In time order, each run
+takes the first unused bus that left from 5 min before to 30 min after it; a run without one is
+missed. The bus's coverage of its own trip's shape decides `run` or `partial`. A direction no
+GTFS shape matches has its runs `unmeasured`. A bus no run takes is not counted. The server
+keeps each day's daily schedules (all lines, about 20 KB gzip a day) under its state directory
+(`daily/YYYY-MM-DD.json.gz`), so the stats of a day can be written again later.
+
 Limits: the matcher assigns each vehicle to the closest scheduled trip, so a late bus can take
 the slot of a cancelled one (`run` is an upper bound of the trips really run); a bus without
 working telematics looks like a missed trip (`missed` is an upper bound of cancellations); an
 outage of the server (an hour with few `fixes` in `hours[]`) makes its trips missed; with an
-expired feed, a line or trip the old timetable has but OASA no longer runs counts as missed. Rows of
+expired feed and no daily schedule of the line, a line or trip the old timetable has but OASA no
+longer runs counts as missed; with the daily schedule, a late bus can take the run after a
+cancelled one the same way. Rows of
 another GTFS version are ignored; when they are most of the day's rows, `trips` is left out.
 
 ### Start delays (`start_delay`)

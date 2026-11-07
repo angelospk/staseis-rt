@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/angelospk/athens-transit-rt/internal/gtfs"
 	"github.com/angelospk/athens-transit-rt/internal/release"
+	"github.com/angelospk/athens-transit-rt/internal/server"
 	"github.com/angelospk/athens-transit-rt/internal/stats"
 )
 
@@ -17,7 +19,7 @@ func statsCmd(args []string) error {
 	hist := fs.String("history", "/var/lib/atrt/history", "fix history directory")
 	out := fs.String("out", "/var/lib/atrt/stats", "output directory (days/<date>.json, index.json)")
 	gtfsPath := fs.String("gtfs", "", "GTFS zip for the trips section (default: the snapshot in -state)")
-	state := fs.String("state", "/var/lib/atrt", "state directory with the GTFS snapshot")
+	state := fs.String("state", "/var/lib/atrt", "state directory with the GTFS snapshot and the daily schedule archive (daily/)")
 	force := fs.Bool("force", false, "rewrite days that already have a file")
 	fs.Parse(args)
 	loc, err := time.LoadLocation(stats.TZ)
@@ -32,7 +34,8 @@ func statsCmd(args []string) error {
 	if feed == nil {
 		fmt.Fprintln(os.Stderr, "stats: no GTFS feed found (-gtfs or -state): days get no trips section")
 	} else {
-		plan = func(date string) (*stats.Plan, error) { return stats.NewPlan(feed, version, date, loc) }
+		daily := filepath.Join(*state, "daily") // the archived OASA daily schedules (serve writes them)
+		plan = func(date string) (*stats.Plan, error) { return server.DailyPlan(feed, version, date, loc, daily) }
 	}
 	days, err := stats.Run(*hist, *out, loc, time.Now(), *force, plan)
 	for _, d := range days {

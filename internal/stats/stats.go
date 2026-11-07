@@ -172,7 +172,7 @@ func Compute(date string, loc *time.Location, files []string, now time.Time, pla
 	lines := map[string]*acc{}
 	day := &Day{Version: Version, Date: date, TZ: loc.String(), GeneratedAt: now.Unix(), Files: len(files)}
 	if trips != nil {
-		day.Trips = trips.result()
+		day.Trips = trips.result(loc)
 	}
 	day.StartDelay = delays.result()
 	vehs := map[string]bool{}
@@ -307,7 +307,7 @@ func readFile(path string, from, to int64, recs []rec, strs map[string]string, t
 					sm = v
 				}
 			}
-			trips.add(t, row[tripCol], g, float64(sm))
+			trips.add(t, intern(row[col["veh"]]), intern(row[tripCol]), g, float64(sm))
 		}
 		if runCol >= 0 && startCol >= 0 && row[runCol] != "" {
 			run, err1 := strconv.ParseInt(row[runCol], 10, 64)

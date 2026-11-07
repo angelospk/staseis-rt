@@ -2368,7 +2368,11 @@ components:
             gtfs: {type: string, description: Static GTFS version the trips come from.}
             gtfs_expired:
               type: boolean
-              description: The day is outside the feed's validity; its trips are those of the same weekday inside it.
+              description: The day is outside the feed's validity. Lines with an archived OASA daily schedule are planned from it (schedule_source); the others take the trips of the same weekday inside the feed.
+            schedule_source:
+              type: string
+              enum: [oasa_daily, gtfs, mixed]
+              description: Where the planned trips come from (some lines each for mixed). Missing on days written before 2026-11.
             min_coverage: {type: number, example: 0.5}
             planned: {type: integer}
             run: {type: integer, description: Covered at least min_coverage.}
@@ -2383,6 +2387,7 @@ components:
                 required: [line, planned, run, partial, missed, unmeasured, missed_trips]
                 properties:
                   line: {type: string}
+                  schedule_source: {type: string, enum: [oasa_daily, gtfs], description: "Where this line's planned trips come from; missing on days written before 2026-11."}
                   planned: {type: integer}
                   run: {type: integer}
                   partial: {type: integer}
@@ -2390,7 +2395,7 @@ components:
                   unmeasured: {type: integer}
                   missed_trips:
                     type: [array, "null"]
-                    description: GTFS trip_ids never seen, by start time.
+                    description: "Never seen, by start time: GTFS trip_ids (gtfs), or `go HH:MM` / `come HH:MM` runs (oasa_daily)."
                     items: {type: string}
         start_delay:
           type: object

@@ -15,6 +15,17 @@ const (
 	TripSlack = 30 * time.Minute
 	// TripsAfter is how long past a day's end its last trips run: Inputs reach this far.
 	TripsAfter = 3 * time.Hour
+	// RunEarly and RunLate: a run of OASA's daily schedule takes a bus that left this early or
+	// this late (DailyDir).
+	RunEarly = 5 * time.Minute
+	RunLate  = TripSlack
+	// RunNearM: a fix this close to the start of its trip's shape is a bus still at the stand.
+	RunNearM = 300.0
+
+	// The plan a line's trips come from (schedule_source); a day with both is SourceMixed.
+	SourceDaily = "oasa_daily"
+	SourceGTFS  = "gtfs"
+	SourceMixed = "mixed"
 )
 
 // PlanTrip is one scheduled trip of a day. FromM and ToM are the metres along the shape of its
@@ -28,11 +39,60 @@ type PlanTrip struct {
 	ToM   float64 `json:"to_m"`
 }
 
-// Plan is the schedule of one local day, from the GTFS feed version GTFS.
+// Plan is the schedule of one local day, from the GTFS feed version GTFS: the GTFS trips, and
+// for the lines of Daily the runs of OASA's daily schedule instead (UseDaily).
 type Plan struct {
 	GTFS    string     `json:"gtfs"`
 	Expired bool       `json:"expired"` // the day lies outside the feed's validity
 	Trips   []PlanTrip `json:"trips"`
+	Daily   []DailyDir `json:"daily,omitempty"`
+}
+
+// Span is the metres along a trip's shape of its first and last stop; equal when the trip has
+// no usable shape.
+type Span struct {
+	FromM float64 `json:"from_m"`
+	ToM   float64 `json:"to_m"`
+}
+
+// DailyDir is one direction of a line in OASA's daily schedule: its runs that leave in the day
+// (unix s, sorted), and the GTFS trips whose matched rows are buses on it, with their spans.
+// Dir is 0 for the Go runs, 1 for the Come runs.
+//
+// Match rule: the matched rows of one vehicle on one of the Trips are one bus run. It left at
+// its last fix within RunNearM of the start of the trip's shape, or at its first fix when it
+// has none (first seen mid-route). In time order, each run takes the first unused bus that left
+// from RunEarly before to RunLate after it; a run without one is missed. The bus's coverage of
+// its own trip's span decides run or partial, as for a GTFS trip. A direction with no Trips
+// (no GTFS shape ends where it does) has its runs unmeasured.
+type DailyDir struct {
+	Line   string          `json:"line"`
+	Dir    int             `json:"dir"`
+	Starts []int64         `json:"starts"`
+	Trips  map[string]Span `json:"trips"`
+}
+
+// UseDaily plans the lines of dirs from OASA's daily schedule: their GTFS trips leave the plan.
+func (p *Plan) UseDaily(dirs []DailyDir) {
+	daily := map[string]bool{}
+	for _, d := range dirs {
+		daily[d.Line] = true
+	}
+	trips := p.Trips[:0:0]
+	for _, t := range p.Trips {
+		if !daily[t.Line] {
+			trips = append(trips, t)
+		}
+	}
+	p.Trips, p.Daily = trips, dirs
+}
+
+// SpanOf is the span of trip t of m's feed (Span).
+func SpanOf(m *match.Matcher, t *gtfs.Trip) Span {
+	if g := m.Geometry(t); g != nil && g.FromShape && len(g.StopAlong) > 0 {
+		return Span{g.StopAlong[0], g.StopAlong[len(g.StopAlong)-1]}
+	}
+	return Span{}
 }
 
 // PlanFunc returns the plan of a local day (YYYY-MM-DD).
@@ -48,15 +108,18 @@ type TripCount struct {
 }
 
 type TripLine struct {
-	Line string `json:"line"`
+	Line           string `json:"line"`
+	ScheduleSource string `json:"schedule_source"` // SourceDaily or SourceGTFS
 	TripCount
 	MissedTrips []string `json:"missed_trips"`
 }
 
 type Trips struct {
-	GTFS        string  `json:"gtfs"`
-	GTFSExpired bool    `json:"gtfs_expired"`
-	MinCoverage float64 `json:"min_coverage"`
+	GTFS        string `json:"gtfs"`
+	GTFSExpired bool   `json:"gtfs_expired"`
+	// ScheduleSource is where the planned trips come from: SourceDaily, SourceGTFS or SourceMixed.
+	ScheduleSource string  `json:"schedule_source"`
+	MinCoverage    float64 `json:"min_coverage"`
 	TripCount
 	ByLine []TripLine `json:"by_line"`
 }
@@ -88,9 +151,8 @@ func NewPlan(f *gtfs.Feed, version, date string, loc *time.Location) (*Plan, err
 			}
 			pt := PlanTrip{ID: t.ID, Line: f.Line(t), Start: s.Unix(),
 				End: sd.Add(time.Duration(f.End(t)) * time.Second).Unix()}
-			if g := m.Geometry(t); g != nil && g.FromShape && len(g.StopAlong) > 0 {
-				pt.FromM, pt.ToM = g.StopAlong[0], g.StopAlong[len(g.StopAlong)-1]
-			}
+			sp := SpanOf(m, t)
+			pt.FromM, pt.ToM = sp.FromM, sp.ToM
 			p.Trips = append(p.Trips, pt)
 		}
 	}
@@ -110,7 +172,9 @@ type tripCounter struct {
 	plan          *Plan
 	byID          map[string][]int
 	state         []tripSeen
-	stamped, ours int // rows of the day with a feed version, and those of the plan's
+	dailyOf       map[string]int     // GTFS trip id -> index in plan.Daily (the first direction with it)
+	buses         map[busKey]*busRun // the bus runs on the daily directions
+	stamped, ours int                // rows of the day with a feed version, and those of the plan's
 }
 
 type tripSeen struct {
@@ -118,17 +182,58 @@ type tripSeen struct {
 	lo, hi        float64
 }
 
+// busKey is one bus run on a daily direction: the rows of a vehicle on a GTFS trip.
+type busKey struct {
+	dir       int
+	veh, trip string
+}
+
+type busRun struct {
+	seen        tripSeen
+	span        Span
+	first, near int64 // first fix; last fix near the start (0: none)
+}
+
+// left is when the bus left its start (DailyDir).
+func (b *busRun) left() int64 {
+	if b.near != 0 {
+		return b.near
+	}
+	return b.first
+}
+
 func newTripCounter(plan *Plan) *tripCounter {
-	c := &tripCounter{plan: plan, byID: map[string][]int{}, state: make([]tripSeen, len(plan.Trips))}
+	c := &tripCounter{plan: plan, byID: map[string][]int{}, state: make([]tripSeen, len(plan.Trips)),
+		dailyOf: map[string]int{}, buses: map[busKey]*busRun{}}
 	for i, pt := range plan.Trips {
 		c.byID[pt.ID] = append(c.byID[pt.ID], i)
+	}
+	for i, d := range plan.Daily {
+		for id := range d.Trips {
+			if _, ok := c.dailyOf[id]; !ok {
+				c.dailyOf[id] = i
+			}
+		}
 	}
 	return c
 }
 
-// add counts one matched row: fix time t, trip id, feed version and metres along the shape (< 0
-// when unknown).
-func (c *tripCounter) add(t int64, trip, gtfsVer string, sm float64) {
+func (s *tripSeen) note(sm float64, sp Span) {
+	s.any = true
+	if sm < 0 {
+		return
+	}
+	sm = min(max(sm, sp.FromM), sp.ToM)
+	if !s.measured {
+		s.lo, s.hi, s.measured = sm, sm, true
+	} else {
+		s.lo, s.hi = min(s.lo, sm), max(s.hi, sm)
+	}
+}
+
+// add counts one matched row: fix time t, vehicle, trip id, feed version and metres along the
+// shape (< 0 when unknown).
+func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 	if gtfsVer != c.plan.GTFS {
 		return
 	}
@@ -138,17 +243,20 @@ func (c *tripCounter) add(t int64, trip, gtfsVer string, sm float64) {
 		if t < pt.Start-slack || t > pt.End+slack {
 			continue
 		}
-		s := &c.state[k]
-		s.any = true
-		if sm < 0 {
-			continue
+		c.state[k].note(sm, Span{pt.FromM, pt.ToM})
+	}
+	if d, ok := c.dailyOf[trip]; ok {
+		k := busKey{d, veh, trip}
+		b := c.buses[k]
+		if b == nil {
+			b = &busRun{span: c.plan.Daily[d].Trips[trip], first: t}
+			c.buses[k] = b
 		}
-		sm := min(max(sm, pt.FromM), pt.ToM)
-		if !s.measured {
-			s.lo, s.hi, s.measured = sm, sm, true
-		} else {
-			s.lo, s.hi = min(s.lo, sm), max(s.hi, sm)
+		b.first = min(b.first, t)
+		if sm >= 0 && sm-b.span.FromM <= RunNearM {
+			b.near = max(b.near, t)
 		}
+		b.seen.note(sm, b.span)
 	}
 }
 
@@ -160,35 +268,72 @@ func (c *tripCounter) stamp(gtfsVer string) {
 	}
 }
 
+// count adds one planned trip, seen as s on span sp, to l; missed names it.
+func (l *TripLine) count(s tripSeen, sp Span, missed string) {
+	l.Planned++
+	switch {
+	case sp.ToM <= sp.FromM:
+		l.Unmeasured++
+	case !s.any:
+		l.Missed++
+		l.MissedTrips = append(l.MissedTrips, missed)
+	case s.measured && (s.hi-s.lo)/(sp.ToM-sp.FromM) >= MinCoverage:
+		l.Run++
+	default:
+		l.Partial++
+	}
+}
+
 // result is the trips section; nil when the day's rows are mostly of another feed version.
-func (c *tripCounter) result() *Trips {
+func (c *tripCounter) result(loc *time.Location) *Trips {
 	if c.ours == 0 || 2*c.ours < c.stamped {
 		return nil
 	}
 	plan, state := c.plan, c.state
 	out := &Trips{GTFS: plan.GTFS, GTFSExpired: plan.Expired, MinCoverage: MinCoverage}
 	lines := map[string]*TripLine{}
-	for k, pt := range plan.Trips {
-		l := lines[pt.Line]
+	lineOf := func(id, source string) *TripLine {
+		l := lines[id]
 		if l == nil {
-			l = &TripLine{Line: pt.Line}
-			lines[pt.Line] = l
+			l = &TripLine{Line: id, ScheduleSource: source}
+			lines[id] = l
 		}
-		s := state[k]
-		l.Planned++
-		switch {
-		case pt.ToM <= pt.FromM:
-			l.Unmeasured++
-		case !s.any:
-			l.Missed++
-			l.MissedTrips = append(l.MissedTrips, pt.ID)
-		case s.measured && (s.hi-s.lo)/(pt.ToM-pt.FromM) >= MinCoverage:
-			l.Run++
-		default:
-			l.Partial++
+		return l
+	}
+	for k, pt := range plan.Trips {
+		lineOf(pt.Line, SourceGTFS).count(state[k], Span{pt.FromM, pt.ToM}, pt.ID)
+	}
+	byDir := make([][]*busRun, len(plan.Daily))
+	for k, b := range c.buses {
+		byDir[k.dir] = append(byDir[k.dir], b)
+	}
+	early, late := int64(RunEarly/time.Second), int64(RunLate/time.Second)
+	for i, d := range plan.Daily {
+		l := lineOf(d.Line, SourceDaily)
+		buses := byDir[i]
+		sort.Slice(buses, func(i, j int) bool { return buses[i].left() < buses[j].left() })
+		used := make([]bool, len(buses))
+		name := [...]string{"go ", "come "}[min(max(d.Dir, 0), 1)]
+		for _, start := range d.Starts {
+			var s tripSeen
+			var sp Span
+			for k, b := range buses {
+				if used[k] || b.left() < start-early {
+					continue
+				}
+				if b.left() <= start+late {
+					used[k], s, sp = true, b.seen, b.span
+				}
+				break
+			}
+			if !s.any && len(d.Trips) > 0 {
+				sp = Span{0, 1} // no bus: missed, unless no shape could have measured it
+			}
+			l.count(s, sp, name+time.Unix(start, 0).In(loc).Format("15:04"))
 		}
 	}
 	out.ByLine = make([]TripLine, 0, len(lines))
+	sources := map[string]bool{}
 	for _, l := range lines {
 		out.Planned += l.Planned
 		out.Run += l.Run
@@ -196,6 +341,15 @@ func (c *tripCounter) result() *Trips {
 		out.Missed += l.Missed
 		out.Unmeasured += l.Unmeasured
 		out.ByLine = append(out.ByLine, *l)
+		sources[l.ScheduleSource] = true
+	}
+	switch {
+	case sources[SourceDaily] && sources[SourceGTFS]:
+		out.ScheduleSource = SourceMixed
+	case sources[SourceDaily]:
+		out.ScheduleSource = SourceDaily
+	default:
+		out.ScheduleSource = SourceGTFS
 	}
 	sort.Slice(out.ByLine, func(i, j int) bool { return out.ByLine[i].Line < out.ByLine[j].Line })
 	return out

@@ -9,6 +9,14 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
 ## Unreleased
 
 ### Statistics
+- The `trips` block of the daily stats plans from OASA's daily schedule when the static GTFS has
+  expired: one planned trip per OASA run, paired with the buses that left near its time, instead
+  of the trips of the summer timetable. A line without a daily schedule keeps the GTFS plan.
+  `trips.schedule_source` and `by_line[].schedule_source` (`oasa_daily`, `gtfs`, `mixed`) tell
+  which; `missed_trips` of an `oasa_daily` line are `go HH:MM` / `come HH:MM`. The server now
+  keeps every day's daily schedules in `<state>/daily/YYYY-MM-DD.json.gz` (about 20 KB a day,
+  no pruning), from the prefetch cache: no new OASA request
+  ([#99](https://github.com/angelospk/staseis-rt/issues/99)).
 - Daily stats files get `start_delay` (contract rev 17): per line, how late the runs of OASA's
   daily schedule left their first stop (runs measured, mean, p90, and a minute histogram so
   several days add up). Measured for buses seen leaving on a clear run (#55); days without it
