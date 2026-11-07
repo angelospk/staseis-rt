@@ -215,6 +215,19 @@ func TestStopArrivalsLiveTakesNearestRun(t *testing.T) {
 	}
 }
 
+// A board row at 0,0 has no GPS: citybus.gr made it from its timetable (vehicleCode is a trip key such
+// as 20261107_0302_0000010_22_45). It is no bus; the timetable run stays, once.
+func TestStopArrivalsNoGPSRowIsTimetable(t *testing.T) {
+	m := buildModel(lineRaw())
+	c := athensClock(time.Now().Unix())
+	now := c.Midnight + 36000 - 600 // 09:50, today
+	ghost := &Board{Stop: "B", At: now, Rows: []LiveRow{row("10", "0", "0", 12, "20261107_10_0000007_10_00")}}
+	a := stopArrivals(m, "B", ghost, now)
+	if len(a) != 1 || a[0].Live || a[0].Vehicle != "" || a[0].Trip != "7" || a[0].At-now != 720 {
+		t.Fatalf("no GPS: %+v", a)
+	}
+}
+
 func TestStopArrivalsAroundMidnight(t *testing.T) {
 	m := buildModel(lineRaw())
 	c := athensClock(time.Now().Unix())

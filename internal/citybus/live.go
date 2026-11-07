@@ -217,7 +217,7 @@ func athensClock(unix int64) Clock {
 	return Clock{Date: t.Format("2006-01-02"), Day: int(t.Weekday()), Sec: sec, Midnight: unix - sec}
 }
 
-// stopArrivals lists a stop's arrivals: the board's buses (live), then the timetable runs not yet
+// stopArrivals lists a stop's arrivals: the board's buses with a position (live), then the timetable runs not yet
 // covered by a live bus (each live bus takes the scheduled run nearest its time, within 15 min).
 // Up to 2 h ahead, at most 4 per line|headsign and 30 in all.
 func stopArrivals(m *Model, stop string, board *Board, now int64) []Arrival {
@@ -227,8 +227,8 @@ func stopArrivals(m *Model, stop string, board *Board, now int64) []Arrival {
 	if board != nil {
 		for _, r := range board.Rows {
 			route := m.Routes[r.RouteCode]
-			if route == nil {
-				continue
+			if route == nil || (r.Latitude == 0 && r.Longitude == 0) {
+				continue // 0,0: no GPS, a row citybus.gr made from its timetable; the timetable run below stands
 			}
 			at := board.At + int64(float64(r.DepartureMins)*60+float64(r.DepartureSeconds))
 			if at < now {
