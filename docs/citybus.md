@@ -41,9 +41,12 @@ cities; `/` and `/{city}/debug` show the rotation state.
 - No position older than 120 s (`MaxAge`).
 - Line health per city in `<state>/<city>/health.json` (same format as the bridge): a line with no
   live bus for 7 tracked days leaves the rotation and gets one check board per cycle.
-- Never deploy this publicly before e-analysis agrees (prototype report, section 6).
+- Public since 2026-11-07 (staseis-rt.haroldpoi.dev), without e-analysis consent: Harold's decision. The prototype report (section 6) asked for consent first.
 
 ## Rollout on the mini PC (staging, tailnet only)
+
+Historical: the mini PC staging no longer runs (2026-11-07). Production is the `atrt-citybus` container
+on the Oracle VPS, behind `staseis-rt.haroldpoi.dev`.
 
 User service `atrt-citybus`, `127.0.0.1:8103`, tailnet `https://minipc.tail11f3d4.ts.net:10449/<city>/...`.
 Cities were moved from the bridge one at a time, in index order. Each city ran ≥ 10 min in service
