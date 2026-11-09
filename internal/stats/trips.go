@@ -269,7 +269,9 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		k := busKey{d, veh}
 		b := c.cur[k]
 		if b != nil && t < b.first {
-			return // a late copy of a fix of an earlier run (a restart)
+			// The history writes a vehicle's fixes in time order (history.Writer drops one not
+			// newer than its last), so an older row is a copy written again after a restart.
+			return
 		}
 		if b == nil || t > b.last && (share >= 0 && share < b.at-RunBack || t-b.last > slack) {
 			b = &busRun{key: k, first: t, last: t, at: -1}
