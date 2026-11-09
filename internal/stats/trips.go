@@ -21,6 +21,8 @@ const (
 	RunLate  = TripSlack
 	// RunNearM: a fix this close to its trip's first stop (or before it) is a bus still at the stand.
 	RunNearM = 300.0
+	// RunBack: a bus this share of its route behind its previous fix started a new run (DailyDir).
+	RunBack = 0.5
 
 	// The plan a line's trips come from (schedule_source); a day with both is SourceMixed.
 	SourceDaily = "oasa_daily"
@@ -59,13 +61,18 @@ type Span struct {
 // (unix s, sorted), and the GTFS trips whose matched rows are buses on it, with their spans.
 // Dir is 0 for the Go runs, 1 for the Come runs.
 //
-// Match rule: the matched rows of one vehicle on one of the Trips are one bus run. It left at
-// its last fix within RunNearM of the trip's first stop, or at its first fix when it
-// has none (first seen mid-route). In time order, each run takes the first unused bus that left
-// from RunEarly before to RunLate after it; a run without one is missed. The bus's coverage of
-// its own trip's span decides run or partial, as for a GTFS trip. A trip in two directions (a
-// loop) pairs with neither. A direction without a trip of its own with a usable span (no GTFS
-// shape ends where it does) has its runs without a bus unmeasured.
+// Match rule: the matched rows of one vehicle on any of the Trips are one bus run, whatever trip
+// id each row has: the matcher moves a bus between the trips of a direction at the stand and on
+// the way (#131). A new run starts when the bus is more than RunBack of the route behind its
+// previous fix (back at the first stop) or after TripSlack without a fix. A run left at its last
+// fix within RunNearM of the first stop, or at its first fix when it has none (first seen
+// mid-route). A fix before the run's first fix is dropped: a copy of an earlier run's. In time
+// order, each run takes the first unused bus that left from RunEarly before to RunLate after
+// it; a run without one is missed. The bus's coverage decides run or partial, as for a GTFS
+// trip: each fix counts as its share (0 to 1) of its own trip's span, so trips on different
+// shapes add up. A trip in two directions (a loop) pairs with neither. A direction without a
+// trip of its own with a usable span (no GTFS shape ends where it does) has its runs without a
+// bus unmeasured.
 type DailyDir struct {
 	Line   string          `json:"line"`
 	Dir    int             `json:"dir"`
@@ -174,7 +181,8 @@ type tripCounter struct {
 	byID          map[string][]int
 	state         []tripSeen
 	dailyOf       map[string]int     // GTFS trip id -> index in plan.Daily (the first direction with it)
-	buses         map[busKey]*busRun // the bus runs on the daily directions
+	cur           map[busKey]*busRun // the latest bus run of each vehicle on a daily direction
+	buses         []*busRun          // all bus runs on the daily directions
 	stamped, ours int                // rows of the day with a feed version, and those of the plan's
 }
 
@@ -183,17 +191,20 @@ type tripSeen struct {
 	lo, hi        float64
 }
 
-// busKey is one bus run on a daily direction: the rows of a vehicle on a GTFS trip.
+// busKey is a vehicle on a daily direction.
 type busKey struct {
-	dir       int
-	veh, trip string
+	dir int
+	veh string
 }
 
+// busRun is one run of a bus on a daily direction (DailyDir). seen is in shares of the trip
+// spans, on Span{0, 1} (span) when one of its trips has a usable span.
 type busRun struct {
-	key         busKey
-	seen        tripSeen
-	span        Span
-	first, near int64 // first fix; last fix near the start (0: none)
+	key               busKey
+	seen              tripSeen
+	span              Span
+	first, last, near int64   // first and last fix; last fix near the start (0: none)
+	at                float64 // share of the route at the last measured fix (-1: none)
 }
 
 // left is when the bus left its start (DailyDir).
@@ -206,7 +217,7 @@ func (b *busRun) left() int64 {
 
 func newTripCounter(plan *Plan) *tripCounter {
 	c := &tripCounter{plan: plan, byID: map[string][]int{}, state: make([]tripSeen, len(plan.Trips)),
-		dailyOf: map[string]int{}, buses: map[busKey]*busRun{}}
+		dailyOf: map[string]int{}, cur: map[busKey]*busRun{}}
 	for i, pt := range plan.Trips {
 		c.byID[pt.ID] = append(c.byID[pt.ID], i)
 	}
@@ -250,17 +261,34 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		c.state[k].note(sm, Span{pt.FromM, pt.ToM})
 	}
 	if d, ok := c.dailyOf[trip]; ok && d >= 0 {
-		k := busKey{d, veh, trip}
-		b := c.buses[k]
-		if b == nil {
-			b = &busRun{key: k, span: c.plan.Daily[d].Trips[trip], first: t}
-			c.buses[k] = b
+		sp := c.plan.Daily[d].Trips[trip]
+		share := -1.0
+		if sm >= 0 && sp.ToM > sp.FromM {
+			share = min(max((sm-sp.FromM)/(sp.ToM-sp.FromM), 0), 1)
 		}
-		b.first = min(b.first, t)
-		if sm >= 0 && sm-b.span.FromM <= RunNearM {
+		k := busKey{d, veh}
+		b := c.cur[k]
+		if b != nil && t < b.first {
+			// The history writes a vehicle's fixes in time order (history.Writer drops one not
+			// newer than its last), so an older row is a copy written again after a restart.
+			return
+		}
+		if b == nil || t > b.last && (share >= 0 && share < b.at-RunBack || t-b.last > slack) {
+			b = &busRun{key: k, first: t, last: t, at: -1}
+			c.cur[k] = b
+			c.buses = append(c.buses, b)
+		}
+		if t >= b.last && share >= 0 {
+			b.at = share
+		}
+		b.first, b.last = min(b.first, t), max(b.last, t)
+		if sm >= 0 && sm-sp.FromM <= RunNearM {
 			b.near = max(b.near, t)
 		}
-		b.seen.note(sm, b.span)
+		if sp.ToM > sp.FromM {
+			b.span = Span{0, 1}
+		}
+		b.seen.note(share, b.span)
 	}
 }
 
@@ -319,14 +347,14 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 		lineOf(pt.Line, SourceGTFS).count(state[k], Span{pt.FromM, pt.ToM}, pt.ID)
 	}
 	byDir := make([][]*busRun, len(plan.Daily))
-	for k, b := range c.buses {
-		byDir[k.dir] = append(byDir[k.dir], b)
+	for _, b := range c.buses {
+		byDir[b.key.dir] = append(byDir[b.key.dir], b)
 	}
 	early, late := int64(RunEarly/time.Second), int64(RunLate/time.Second)
 	for i, d := range plan.Daily {
 		l := lineOf(d.Line, SourceDaily)
 		buses := byDir[i]
-		sort.Slice(buses, func(i, j int) bool { // the map's order is random: tie-break, so reruns agree
+		sort.Slice(buses, func(i, j int) bool { // tie-break, so reruns agree
 			a, b := buses[i], buses[j]
 			if a.left() != b.left() {
 				return a.left() < b.left()
@@ -334,7 +362,7 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 			if a.key.veh != b.key.veh {
 				return a.key.veh < b.key.veh
 			}
-			return a.key.trip < b.key.trip
+			return a.first < b.first
 		})
 		used := make([]bool, len(buses))
 		name := [...]string{"go ", "come "}[min(max(d.Dir, 0), 1)]

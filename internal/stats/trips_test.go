@@ -321,3 +321,161 @@ func TestDailyAmbiguousOrShapelessTripsAreUnmeasured(t *testing.T) {
 		t.Fatalf("trips = %s", got)
 	}
 }
+
+// Real rows of bus 44552 on line 550 on 2026-10-27 (thinned; trip ids without "959_day_2_").
+// At the stand and on the way the matcher moves the bus between trips of the same direction,
+// so one bus run has rows on many trip ids (#131). It left at 08:04 (the 08:00 go run, shape 139)
+// and covered the whole route; at 09:17 it was at the first stop of the come direction (shape
+// 245) for the 09:30 come run: it left at 09:40 and was seen up to 3.5 km.
+func TestDailyRunSpansTheTripIdsOfOneBus(t *testing.T) {
+	dir := t.TempDir()
+	at := func(hms string) time.Time {
+		var h, m, s int
+		fmt.Sscanf(hms, "%d:%d:%d", &h, &m, &s)
+		return local(2026, 10, 27, h, m, s)
+	}
+	rows := []struct {
+		at, trip string
+		sm       int
+	}{
+		{"07:28:50", "1546_0740", 0}, {"07:33:14", "1546_0740", 21}, {"07:39:42", "1546_0740", 22},
+		{"07:40:23", "1553_0750", 41}, {"07:45:48", "1553_0750", 40}, {"07:52:16", "1553_0750", 41},
+		{"07:53:39", "1554_0800", 47}, {"07:59:27", "1554_0800", 44},
+		{"08:00:28", "1547_0815", 45}, {"08:03:53", "1547_0815", 62},
+		{"08:04:36", "1554_0800", 239}, {"08:06:16", "1554_0800", 842}, {"08:13:02", "1554_0800", 2746},
+		{"08:22:26", "1554_0800", 5279}, {"08:29:41", "1554_0800", 8042}, {"08:39:42", "1554_0800", 10722},
+		{"08:49:26", "1554_0800", 12877}, {"08:51:09", "1550_0715", 13537}, {"08:53:22", "1550_0715", 13820},
+		{"08:54:31", "1546_0740", 14398}, {"08:55:22", "1546_0740", 14511}, {"08:57:10", "1554_0800", 14685},
+		{"09:04:00", "1554_0800", 16159}, {"09:11:34", "1554_0800", 18429}, {"09:15:12", "1554_0800", 20252},
+		{"09:17:42", "1560_0821", 70}, {"09:19:24", "1560_0821", 29},
+		{"09:20:46", "1546_0925", 28}, {"09:25:51", "1546_0925", 0}, {"09:29:36", "1546_0925", 0},
+		{"09:30:17", "1553_0935", 0}, {"09:34:39", "1553_0935", 39}, {"09:39:47", "1553_0935", 78},
+		{"09:40:40", "1553_0935", 236}, {"09:41:39", "1553_0935", 503}, {"09:44:36", "1553_0935", 1846},
+		{"09:49:40", "1553_0935", 3536},
+	}
+	var csv []string
+	for _, r := range rows {
+		csv = append(csv, vrow(at(r.at), "550", "44552", r.trip, r.sm, "g"))
+	}
+	writeRows(t, dir, at("07:00:00"), csv...)
+	s139, s245 := Span{23.2, 20781.3}, Span{0, 20798.3}
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	plan.UseDaily([]DailyDir{
+		{Line: "550", Dir: 0, Starts: []int64{at("08:00:00").Unix()}, Trips: map[string]Span{"1546_0740": s139,
+			"1550_0715": s139, "1553_0750": s139, "1554_0800": s139, "1547_0815": s139}},
+		{Line: "550", Dir: 1, Starts: []int64{at("09:30:00").Unix()}, Trips: map[string]Span{"1560_0821": s245,
+			"1546_0925": s245, "1553_0935": s245}},
+	})
+	d, err := Compute("2026-10-27", athens, inputs(t, dir, "2026-10-27"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 1, Partial: 1}) {
+		t.Fatalf("trips = %+v, want the 08:00 run and the 09:30 partial", got)
+	}
+}
+
+// A bus first seen mid-route twice in a day, the second time not far behind its last fix, made
+// two runs: more than TripSlack without a fix of it on the direction ends a run.
+func TestDailyRunEndsAfterALongGap(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 10), "L", "a", "T1", 1000, "g"), vrow(at(8, 40), "L", "a", "T1", 3900, "g"),
+		vrow(at(10, 10), "L", "a", "T2", 2500, "g"), vrow(at(10, 40), "L", "a", "T2", 3900, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(10, 0).Unix()},
+		Trips: map[string]Span{"T1": span, "T2": span}}})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 1, Partial: 1}) {
+		t.Fatalf("trips = %+v", got)
+	}
+}
+
+// A bus that runs go, come and go again on a short line, with less than TripSlack between its go
+// fixes, made two go runs: it was back at the first stop after it had left it.
+func TestDailyRunEndsBackAtTheFirstStop(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 0), "L", "a", "G1", 50, "g"), vrow(at(8, 2), "L", "a", "G1", 400, "g"), vrow(at(8, 18), "L", "a", "G1", 3900, "g"),
+		vrow(at(8, 24), "L", "a", "C1", 50, "g"), vrow(at(8, 40), "L", "a", "C1", 3900, "g"),
+		vrow(at(8, 48), "L", "a", "G2", 50, "g"), vrow(at(8, 51), "L", "a", "G1", 400, "g"), vrow(at(9, 8), "L", "a", "G2", 3900, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{
+		{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(8, 50).Unix()}, Trips: map[string]Span{"G1": span, "G2": span}},
+		{Line: "L", Dir: 1, Starts: []int64{at(8, 25).Unix()}, Trips: map[string]Span{"C1": span}},
+	})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 3, Run: 3}) {
+		t.Fatalf("trips = %+v", got)
+	}
+}
+
+// A bus on a loop passed the first stop with no fix near it: a fix far behind the previous one
+// started a new run.
+func TestDailyRunEndsWhenTheBusJumpsBack(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 0), "L", "a", "G1", 50, "g"), vrow(at(8, 10), "L", "a", "G1", 2000, "g"), vrow(at(8, 20), "L", "a", "G1", 3800, "g"),
+		vrow(at(8, 22), "L", "a", "G2", 500, "g"), vrow(at(8, 30), "L", "a", "G2", 2000, "g"), vrow(at(8, 40), "L", "a", "G1", 3900, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(8, 20).Unix()},
+		Trips: map[string]Span{"G1": span, "G2": span}}})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 2}) {
+		t.Fatalf("trips = %+v", got)
+	}
+}
+
+// Shares of the route are clamped to [0, 1], and a late copy of a fix of an earlier run (a
+// restart) is dropped. Line A: a fix before the first stop counts as the start, so the bus
+// covered half the route. Line B: a fix past the last stop is the end, not 1.2 of the route, so
+// the next fix at 0.71 is no jump back and makes no extra run to take the 08:30 start from bus b.
+// Line C: the copy of the 08:20 fix, read after the 09:00 run began, does not extend that run.
+func TestDailyRunSharesAreClampedAndOldRowsDropped(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 0), "A", "a", "A1", 0, "g"), vrow(at(8, 10), "A", "a", "A1", 2100, "g"),
+		vrow(at(8, 0), "B", "b1", "B1", 100, "g"), vrow(at(8, 15), "B", "b1", "B1", 5000, "g"),
+		vrow(at(8, 27), "B", "b1", "B1", 2950, "g"),
+		vrow(at(8, 31), "B", "b2", "B1", 100, "g"), vrow(at(8, 50), "B", "b2", "B1", 4100, "g"),
+		vrow(at(8, 0), "C", "c", "C1", 100, "g"), vrow(at(8, 20), "C", "c", "C1", 4100, "g"),
+		vrow(at(9, 0), "C", "c", "C1", 100, "g"), vrow(at(9, 10), "C", "c", "C1", 1000, "g"),
+		vrow(at(8, 20), "C", "c", "C1", 4100, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{100, 4100}
+	plan.UseDaily([]DailyDir{
+		{Line: "A", Dir: 0, Starts: []int64{at(8, 0).Unix()}, Trips: map[string]Span{"A1": span}},
+		{Line: "B", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(8, 30).Unix()}, Trips: map[string]Span{"B1": span}},
+		{Line: "C", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(9, 0).Unix()}, Trips: map[string]Span{"C1": span}},
+	})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]TripCount{"A": {Planned: 1, Run: 1}, "B": {Planned: 2, Run: 2}, "C": {Planned: 2, Run: 1, Partial: 1}}
+	for _, l := range d.Trips.ByLine {
+		if l.TripCount != want[l.Line] {
+			t.Errorf("line %s: %+v, want %+v", l.Line, l.TripCount, want[l.Line])
+		}
+	}
+}
