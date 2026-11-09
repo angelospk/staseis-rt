@@ -324,9 +324,9 @@ func TestDailyAmbiguousOrShapelessTripsAreUnmeasured(t *testing.T) {
 
 // Real rows of bus 44552 on line 550 on 2026-10-27 (thinned; trip ids without "959_day_2_").
 // At the stand and on the way the matcher moves the bus between trips of the same direction,
-// so one bus run has rows on many trip ids (#131). It left at 08:04 (the 08:00 run) and covered
-// the whole route; at 09:17 it was back at the first stop for a second run (09:30, left 09:40),
-// seen up to 3.5 km. Both shapes of the direction are in the plan, as in the feed.
+// so one bus run has rows on many trip ids (#131). It left at 08:04 (the 08:00 go run, shape 139)
+// and covered the whole route; at 09:17 it was at the first stop of the come direction (shape
+// 245) for the 09:30 come run: it left at 09:40 and was seen up to 3.5 km.
 func TestDailyRunSpansTheTripIdsOfOneBus(t *testing.T) {
 	dir := t.TempDir()
 	at := func(hms string) time.Time {
@@ -358,11 +358,14 @@ func TestDailyRunSpansTheTripIdsOfOneBus(t *testing.T) {
 		csv = append(csv, vrow(at(r.at), "550", "44552", r.trip, r.sm, "g"))
 	}
 	writeRows(t, dir, at("07:00:00"), csv...)
-	s139, s245 := Span{23.2, 20781.3}, Span{0, 20798.3} // shapes 139 and 245, both direction 0
+	s139, s245 := Span{23.2, 20781.3}, Span{0, 20798.3}
 	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
-	plan.UseDaily([]DailyDir{{Line: "550", Dir: 0, Starts: []int64{at("08:00:00").Unix(), at("09:30:00").Unix()},
-		Trips: map[string]Span{"1546_0740": s139, "1550_0715": s139, "1553_0750": s139, "1554_0800": s139,
-			"1547_0815": s139, "1560_0821": s245, "1546_0925": s245, "1553_0935": s245}}})
+	plan.UseDaily([]DailyDir{
+		{Line: "550", Dir: 0, Starts: []int64{at("08:00:00").Unix()}, Trips: map[string]Span{"1546_0740": s139,
+			"1550_0715": s139, "1553_0750": s139, "1554_0800": s139, "1547_0815": s139}},
+		{Line: "550", Dir: 1, Starts: []int64{at("09:30:00").Unix()}, Trips: map[string]Span{"1560_0821": s245,
+			"1546_0925": s245, "1553_0935": s245}},
+	})
 	d, err := Compute("2026-10-27", athens, inputs(t, dir, "2026-10-27"), time.Unix(0, 0), plan)
 	if err != nil {
 		t.Fatal(err)
@@ -372,19 +375,66 @@ func TestDailyRunSpansTheTripIdsOfOneBus(t *testing.T) {
 	}
 }
 
-// A bus first seen mid-route twice in a day, with no fix near the first stop, made two runs: an
-// hour without a fix of it on the direction ends a run.
+// A bus first seen mid-route twice in a day, the second time not far behind its last fix, made
+// two runs: more than TripSlack without a fix of it on the direction ends a run.
 func TestDailyRunEndsAfterALongGap(t *testing.T) {
 	dir := t.TempDir()
 	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
 	writeRows(t, dir, at(8, 0),
 		vrow(at(8, 10), "L", "a", "T1", 1000, "g"), vrow(at(8, 40), "L", "a", "T1", 3900, "g"),
-		vrow(at(10, 10), "L", "a", "T2", 1000, "g"), vrow(at(10, 40), "L", "a", "T2", 3900, "g"),
+		vrow(at(10, 10), "L", "a", "T2", 2500, "g"), vrow(at(10, 40), "L", "a", "T2", 3900, "g"),
 	)
 	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
 	span := Span{0, 4000}
 	plan.UseDaily([]DailyDir{{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(10, 0).Unix()},
 		Trips: map[string]Span{"T1": span, "T2": span}}})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 1, Partial: 1}) {
+		t.Fatalf("trips = %+v", got)
+	}
+}
+
+// A bus that runs go, come and go again on a short line, with less than TripSlack between its go
+// fixes, made two go runs: it was back at the first stop after it had left it.
+func TestDailyRunEndsBackAtTheFirstStop(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 0), "L", "a", "G1", 50, "g"), vrow(at(8, 2), "L", "a", "G1", 400, "g"), vrow(at(8, 18), "L", "a", "G1", 3900, "g"),
+		vrow(at(8, 24), "L", "a", "C1", 50, "g"), vrow(at(8, 40), "L", "a", "C1", 3900, "g"),
+		vrow(at(8, 48), "L", "a", "G2", 50, "g"), vrow(at(8, 51), "L", "a", "G1", 400, "g"), vrow(at(9, 8), "L", "a", "G2", 3900, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{
+		{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(8, 50).Unix()}, Trips: map[string]Span{"G1": span, "G2": span}},
+		{Line: "L", Dir: 1, Starts: []int64{at(8, 25).Unix()}, Trips: map[string]Span{"C1": span}},
+	})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 3, Run: 3}) {
+		t.Fatalf("trips = %+v", got)
+	}
+}
+
+// A bus on a loop passed the first stop with no fix near it: a fix far behind the previous one
+// started a new run.
+func TestDailyRunEndsWhenTheBusJumpsBack(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 0), "L", "a", "G1", 50, "g"), vrow(at(8, 10), "L", "a", "G1", 2000, "g"), vrow(at(8, 20), "L", "a", "G1", 3800, "g"),
+		vrow(at(8, 22), "L", "a", "G2", 500, "g"), vrow(at(8, 30), "L", "a", "G2", 2000, "g"), vrow(at(8, 40), "L", "a", "G1", 3900, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(8, 20).Unix()},
+		Trips: map[string]Span{"G1": span, "G2": span}}})
 	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
 	if err != nil {
 		t.Fatal(err)

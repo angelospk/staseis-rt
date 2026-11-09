@@ -473,11 +473,15 @@ run = `run / (planned - unmeasured)`.
 A line planned from OASA's daily schedule (`oasa_daily`) has one planned trip per run: the
 day's runs that leave before midnight, and the runs at 24:00 and later of the day before. The
 runs have no `trip_id`, so they are paired with the buses that ran: the matched rows of one
-vehicle on one GTFS trip whose shape ends where the run's direction does (by name, as the
-`seen` flags of the schedule) are one bus run, which left at its last fix within 300 m of its
-first stop, or at its first fix when it was first seen further on. In time order, each run
-takes the first unused bus that left from 5 min before to 30 min after it; a run without one is
-missed. The bus's coverage of its own trip's shape decides `run` or `partial`. A GTFS trip that
+vehicle on the GTFS trips whose shape ends where the run's direction does (by name, as the
+`seen` flags of the schedule) are one bus run, whatever trip each row has (the matcher moves a
+bus between those trips at the stand and on the way). A new bus run starts when the vehicle is
+more than half of the route behind its previous fix (back at the start) or after 30 min without
+a fix. A bus run left at its last fix within 300 m of its first stop, or at its first fix when
+it was first seen further on. In time order, each run takes the first unused bus that left from
+5 min before to 30 min after it; a run without one is missed. The bus's coverage decides `run`
+or `partial`: each fix counts as its share of its own trip's shape, so trips on different
+shapes add up. A GTFS trip that
 matches both directions (a loop) pairs with neither. A direction with no GTFS shape of its own
 has its runs without a bus `unmeasured`. A bus no run takes is not counted. The server
 keeps each day's daily schedules (all lines, about 20 KB gzip a day) under its state directory
