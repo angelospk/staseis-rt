@@ -443,3 +443,39 @@ func TestDailyRunEndsWhenTheBusJumpsBack(t *testing.T) {
 		t.Fatalf("trips = %+v", got)
 	}
 }
+
+// Shares of the route are clamped to [0, 1], and a late copy of a fix of an earlier run (a
+// restart) is dropped. Line A: a fix before the first stop counts as the start, so the bus
+// covered half the route. Line B: a fix past the last stop is the end, not 1.2 of the route, so
+// the next fix at 0.71 is no jump back and makes no extra run to take the 08:30 start from bus b.
+// Line C: the copy of the 08:20 fix, read after the 09:00 run began, does not extend that run.
+func TestDailyRunSharesAreClampedAndOldRowsDropped(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 0), "A", "a", "A1", 0, "g"), vrow(at(8, 10), "A", "a", "A1", 2100, "g"),
+		vrow(at(8, 0), "B", "b1", "B1", 100, "g"), vrow(at(8, 15), "B", "b1", "B1", 5000, "g"),
+		vrow(at(8, 27), "B", "b1", "B1", 2950, "g"),
+		vrow(at(8, 31), "B", "b2", "B1", 100, "g"), vrow(at(8, 50), "B", "b2", "B1", 4100, "g"),
+		vrow(at(8, 0), "C", "c", "C1", 100, "g"), vrow(at(8, 20), "C", "c", "C1", 4100, "g"),
+		vrow(at(9, 0), "C", "c", "C1", 100, "g"), vrow(at(9, 10), "C", "c", "C1", 1000, "g"),
+		vrow(at(8, 20), "C", "c", "C1", 4100, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{100, 4100}
+	plan.UseDaily([]DailyDir{
+		{Line: "A", Dir: 0, Starts: []int64{at(8, 0).Unix()}, Trips: map[string]Span{"A1": span}},
+		{Line: "B", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(8, 30).Unix()}, Trips: map[string]Span{"B1": span}},
+		{Line: "C", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(9, 0).Unix()}, Trips: map[string]Span{"C1": span}},
+	})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]TripCount{"A": {Planned: 1, Run: 1}, "B": {Planned: 2, Run: 2}, "C": {Planned: 2, Run: 1, Partial: 1}}
+	for _, l := range d.Trips.ByLine {
+		if l.TripCount != want[l.Line] {
+			t.Errorf("line %s: %+v, want %+v", l.Line, l.TripCount, want[l.Line])
+		}
+	}
+}

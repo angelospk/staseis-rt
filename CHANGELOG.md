@@ -27,7 +27,7 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
 - `oasa_daily` trips: a bus run is now all rows of a vehicle on a direction, not one (vehicle,
   trip id) pair. The matcher moves a bus between trip ids at the stand and on the way, so one run
   was split into short pieces that took scheduled starts as `partial` (11-07: 28% partial against
-  6% on the GTFS plan). Replay of 2026-10-27 with the same starts: partial 33.8% to 7.3% (GTFS
+  6% on the GTFS plan). Replay of 2026-10-27 with the same starts: partial 33.8% to 7.4% (GTFS
   5.7%) ([#131](https://github.com/angelospk/staseis-rt/issues/131)).
 - Daily stats files get `start_delay` (contract rev 17): per line, how late the runs of OASA's
   daily schedule left their first stop (runs measured, mean, p90, and a minute histogram so

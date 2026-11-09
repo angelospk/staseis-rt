@@ -66,12 +66,13 @@ type Span struct {
 // the way (#131). A new run starts when the bus is more than RunBack of the route behind its
 // previous fix (back at the first stop) or after TripSlack without a fix. A run left at its last
 // fix within RunNearM of the first stop, or at its first fix when it has none (first seen
-// mid-route). In time order,
-// each run takes the first unused bus that left from RunEarly before to RunLate after it; a run
-// without one is missed. The bus's coverage decides run or partial, as for a GTFS trip: each fix
-// counts as its share of its own trip's span, so trips on different shapes add up. A trip in two
-// directions (a loop) pairs with neither. A direction without a trip of its own with a usable
-// span (no GTFS shape ends where it does) has its runs without a bus unmeasured.
+// mid-route). A fix before the run's first fix is dropped: a copy of an earlier run's. In time
+// order, each run takes the first unused bus that left from RunEarly before to RunLate after
+// it; a run without one is missed. The bus's coverage decides run or partial, as for a GTFS
+// trip: each fix counts as its share (0 to 1) of its own trip's span, so trips on different
+// shapes add up. A trip in two directions (a loop) pairs with neither. A direction without a
+// trip of its own with a usable span (no GTFS shape ends where it does) has its runs without a
+// bus unmeasured.
 type DailyDir struct {
 	Line   string          `json:"line"`
 	Dir    int             `json:"dir"`
@@ -263,10 +264,13 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		sp := c.plan.Daily[d].Trips[trip]
 		share := -1.0
 		if sm >= 0 && sp.ToM > sp.FromM {
-			share = (sm - sp.FromM) / (sp.ToM - sp.FromM)
+			share = min(max((sm-sp.FromM)/(sp.ToM-sp.FromM), 0), 1)
 		}
 		k := busKey{d, veh}
 		b := c.cur[k]
+		if b != nil && t < b.first {
+			return // a late copy of a fix of an earlier run (a restart)
+		}
 		if b == nil || t > b.last && (share >= 0 && share < b.at-RunBack || t-b.last > slack) {
 			b = &busRun{key: k, first: t, last: t, at: -1}
 			c.cur[k] = b
