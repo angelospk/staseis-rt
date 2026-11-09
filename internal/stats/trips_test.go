@@ -321,3 +321,75 @@ func TestDailyAmbiguousOrShapelessTripsAreUnmeasured(t *testing.T) {
 		t.Fatalf("trips = %s", got)
 	}
 }
+
+// Real rows of bus 44552 on line 550 on 2026-10-27 (thinned; trip ids without "959_day_2_").
+// At the stand and on the way the matcher moves the bus between trips of the same direction,
+// so one bus run has rows on many trip ids (#131). It left at 08:04 (the 08:00 run) and covered
+// the whole route; at 09:17 it was back at the first stop for a second run (09:30, left 09:40),
+// seen up to 3.5 km. Both shapes of the direction are in the plan, as in the feed.
+func TestDailyRunSpansTheTripIdsOfOneBus(t *testing.T) {
+	dir := t.TempDir()
+	at := func(hms string) time.Time {
+		var h, m, s int
+		fmt.Sscanf(hms, "%d:%d:%d", &h, &m, &s)
+		return local(2026, 10, 27, h, m, s)
+	}
+	rows := []struct {
+		at, trip string
+		sm       int
+	}{
+		{"07:28:50", "1546_0740", 0}, {"07:33:14", "1546_0740", 21}, {"07:39:42", "1546_0740", 22},
+		{"07:40:23", "1553_0750", 41}, {"07:45:48", "1553_0750", 40}, {"07:52:16", "1553_0750", 41},
+		{"07:53:39", "1554_0800", 47}, {"07:59:27", "1554_0800", 44},
+		{"08:00:28", "1547_0815", 45}, {"08:03:53", "1547_0815", 62},
+		{"08:04:36", "1554_0800", 239}, {"08:06:16", "1554_0800", 842}, {"08:13:02", "1554_0800", 2746},
+		{"08:22:26", "1554_0800", 5279}, {"08:29:41", "1554_0800", 8042}, {"08:39:42", "1554_0800", 10722},
+		{"08:49:26", "1554_0800", 12877}, {"08:51:09", "1550_0715", 13537}, {"08:53:22", "1550_0715", 13820},
+		{"08:54:31", "1546_0740", 14398}, {"08:55:22", "1546_0740", 14511}, {"08:57:10", "1554_0800", 14685},
+		{"09:04:00", "1554_0800", 16159}, {"09:11:34", "1554_0800", 18429}, {"09:15:12", "1554_0800", 20252},
+		{"09:17:42", "1560_0821", 70}, {"09:19:24", "1560_0821", 29},
+		{"09:20:46", "1546_0925", 28}, {"09:25:51", "1546_0925", 0}, {"09:29:36", "1546_0925", 0},
+		{"09:30:17", "1553_0935", 0}, {"09:34:39", "1553_0935", 39}, {"09:39:47", "1553_0935", 78},
+		{"09:40:40", "1553_0935", 236}, {"09:41:39", "1553_0935", 503}, {"09:44:36", "1553_0935", 1846},
+		{"09:49:40", "1553_0935", 3536},
+	}
+	var csv []string
+	for _, r := range rows {
+		csv = append(csv, vrow(at(r.at), "550", "44552", r.trip, r.sm, "g"))
+	}
+	writeRows(t, dir, at("07:00:00"), csv...)
+	s139, s245 := Span{23.2, 20781.3}, Span{0, 20798.3} // shapes 139 and 245, both direction 0
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	plan.UseDaily([]DailyDir{{Line: "550", Dir: 0, Starts: []int64{at("08:00:00").Unix(), at("09:30:00").Unix()},
+		Trips: map[string]Span{"1546_0740": s139, "1550_0715": s139, "1553_0750": s139, "1554_0800": s139,
+			"1547_0815": s139, "1560_0821": s245, "1546_0925": s245, "1553_0935": s245}}})
+	d, err := Compute("2026-10-27", athens, inputs(t, dir, "2026-10-27"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 1, Partial: 1}) {
+		t.Fatalf("trips = %+v, want the 08:00 run and the 09:30 partial", got)
+	}
+}
+
+// A bus first seen mid-route twice in a day, with no fix near the first stop, made two runs: an
+// hour without a fix of it on the direction ends a run.
+func TestDailyRunEndsAfterALongGap(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	writeRows(t, dir, at(8, 0),
+		vrow(at(8, 10), "L", "a", "T1", 1000, "g"), vrow(at(8, 40), "L", "a", "T1", 3900, "g"),
+		vrow(at(10, 10), "L", "a", "T2", 1000, "g"), vrow(at(10, 40), "L", "a", "T2", 3900, "g"),
+	)
+	plan := &Plan{GTFS: "g", Expired: true, Trips: []PlanTrip{}}
+	span := Span{0, 4000}
+	plan.UseDaily([]DailyDir{{Line: "L", Dir: 0, Starts: []int64{at(8, 0).Unix(), at(10, 0).Unix()},
+		Trips: map[string]Span{"T1": span, "T2": span}}})
+	d, err := Compute("2026-10-06", athens, inputs(t, dir, "2026-10-06"), time.Unix(0, 0), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 2}) {
+		t.Fatalf("trips = %+v", got)
+	}
+}
