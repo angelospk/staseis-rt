@@ -202,15 +202,15 @@ func TestStopArrivalsLiveTakesNearestRun(t *testing.T) {
 	c := athensClock(time.Now().Unix())
 	now := c.Midnight + 36000 - 600 // 09:50, today
 	live := &Board{Stop: "B", At: now, Rows: []LiveRow{row("10", "35.3", "25.1", 12, "v1")}}
-	a := stopArrivals(m, "B", live, now)
+	a := stopArrivals(m, "B", live, nil, now)
 	if len(a) != 1 || !a[0].Live || a[0].At-now != 720 {
 		t.Fatalf("live: %+v", a) // the 10:02 run is that bus
 	}
-	none := stopArrivals(m, "B", nil, now)
+	none := stopArrivals(m, "B", nil, nil, now)
 	if len(none) != 1 || none[0].Live || none[0].At-now != 720 || none[0].Trip != "7" {
 		t.Fatalf("timetable: %+v", none)
 	}
-	if got := stopArrivals(m, "E", nil, now); len(got) != 0 {
+	if got := stopArrivals(m, "E", nil, nil, now); len(got) != 0 {
 		t.Fatalf("the trip ends at E: %+v", got)
 	}
 }
@@ -222,7 +222,7 @@ func TestStopArrivalsNoGPSRowIsTimetable(t *testing.T) {
 	c := athensClock(time.Now().Unix())
 	now := c.Midnight + 36000 - 600 // 09:50, today
 	ghost := &Board{Stop: "B", At: now, Rows: []LiveRow{row("10", "0", "0", 12, "20261107_10_0000007_10_00")}}
-	a := stopArrivals(m, "B", ghost, now)
+	a := stopArrivals(m, "B", ghost, nil, now)
 	if len(a) != 1 || a[0].Live || a[0].Vehicle != "" || a[0].Trip != "7" || a[0].At-now != 720 {
 		t.Fatalf("no GPS: %+v", a)
 	}
@@ -234,12 +234,12 @@ func TestStopArrivalsAroundMidnight(t *testing.T) {
 	r := m.Routes["10"]
 	r.Trips = []Trip{{ID: "t1", Day: (c.Day + 1) % 7, Times: []int{600, 720, 840, 960, NoTime}}} // 00:10 tomorrow at A
 	now := c.Midnight + 86400 - 600                                                              // 23:50 today
-	a := stopArrivals(m, "B", nil, now)
+	a := stopArrivals(m, "B", nil, nil, now)
 	if len(a) != 1 || a[0].At-now != 600+720 {
 		t.Fatalf("tomorrow: %+v", a)
 	}
 	r.Trips = []Trip{{ID: "t2", Day: c.Day, Times: []int{86400 + 60, 86400 + 180, NoTime, NoTime, NoTime}}} // 24:01 today
-	a = stopArrivals(m, "A", nil, c.Midnight+86400)
+	a = stopArrivals(m, "A", nil, nil, c.Midnight+86400)
 	if len(a) != 1 || a[0].At-c.Midnight != 86460 {
 		t.Fatalf("yesterday late: %+v", a)
 	}
@@ -250,7 +250,7 @@ func TestStopArrivalsDropPassedLiveRows(t *testing.T) {
 	now := int64(10_000)
 	for _, at := range []int64{now - 200, now - 61} {
 		b := &Board{Stop: "B", At: at, Rows: []LiveRow{row("10", "35.3", "25.1", 1, "v1")}}
-		for _, a := range stopArrivals(m, "B", b, now) {
+		for _, a := range stopArrivals(m, "B", b, nil, now) {
 			if a.Live {
 				t.Fatalf("board at %d: a passed bus shown as due: %+v", at, a)
 			}
@@ -541,5 +541,133 @@ func TestStopsSlightlyBackStayOnOnePass(t *testing.T) {
 	m := stopMetres(shape, cum, []LL{{35.3, 25.11}, {35.3, 25.10996}, {35.3, 25.10992}})
 	if math.Abs(m[2]-m[0]) > 50 || m[1] < m[0] || m[2] < m[1] {
 		t.Fatalf("stopM %v", m)
+	}
+}
+
+// ---- estimated arrivals (rt#136 B): a stop with no board gets the tracked buses due at it ----
+
+func estimated(a []Arrival) []Arrival {
+	out := []Arrival{}
+	for _, x := range a {
+		if x.Estimate {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// near: within 2 s (metres along the shape are floats).
+func near(got, want int64) bool { return got >= want-2 && got <= want+2 }
+
+// A bus due at B in 1 min (the board of B said so): the stops after B get B's time plus the
+// timetable's ride from B (2 min per stop), and that bus takes the timetable run of each stop.
+func TestEstimatesAfterTheDueStopFollowTheTimetable(t *testing.T) {
+	m := buildModel(lineRaw())
+	now := athensClock(time.Now().Unix()).Midnight + 36000 - 60 // 09:59, today
+	l := newLiveCity(m)
+	l.add(Board{Stop: "B", At: now, Rows: []LiveRow{row("10", "35.3", "25.105", 1, "v1")}})
+	placed := l.placed(now, "")
+	for stop, want := range map[string]int64{"B": 60, "C": 180, "D": 300} {
+		a := stopArrivals(m, stop, nil, placed, now)
+		if len(a) != 1 || !a[0].Live || !a[0].Estimate || a[0].Vehicle != "v1" || a[0].At-now != want || a[0].Scheduled != nil || a[0].Lat == 0 {
+			t.Fatalf("%s: want one estimate in %d s (the timetable run is that bus): %+v", stop, want, a)
+		}
+	}
+	if a := stopArrivals(m, "E", nil, placed, now); len(a) != 0 {
+		t.Fatalf("the trip ends at E: %+v", a)
+	}
+	if a := stopArrivals(m, "A", nil, placed, now); len(estimated(a)) != 0 {
+		t.Fatalf("the bus has passed A: %+v", a)
+	}
+	// 100 s later the bus is past its due time and stands at B: C keeps B's time + 2 min, and B
+	// itself (no longer ahead) gets no estimate.
+	later := l.placed(now+100, "")
+	if a := estimated(stopArrivals(m, "C", nil, later, now+100)); len(a) != 1 || a[0].At != now+180 {
+		t.Fatalf("C, 100 s later: %+v", a)
+	}
+	if a := estimated(stopArrivals(m, "B", nil, later, now+100)); len(a) != 0 {
+		t.Fatalf("B, 100 s later: %+v", a)
+	}
+}
+
+// The stops between the bus and the stop it is due at count back from that time on the timetable.
+func TestEstimatesBeforeTheDueStopCountBack(t *testing.T) {
+	m := buildModel(lineRaw())
+	now := athensClock(time.Now().Unix()).Midnight + 36000 - 60
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: now, Rows: []LiveRow{row("10", "35.3", "25.105", 6, "v1")}})
+	placed := l.placed(now, "")
+	for stop, want := range map[string]int64{"B": 120, "C": 240, "D": 360} {
+		a := estimated(stopArrivals(m, stop, nil, placed, now))
+		if len(a) != 1 || a[0].At-now != want {
+			t.Fatalf("%s: want %d s: %+v", stop, want, a)
+		}
+	}
+}
+
+// A board, even an empty or a stale one, wins: no estimates are mixed in.
+func TestBoardWinsOverEstimates(t *testing.T) {
+	m := buildModel(lineRaw())
+	now := athensClock(time.Now().Unix()).Midnight + 36000 - 60
+	l := newLiveCity(m)
+	l.add(Board{Stop: "B", At: now, Rows: []LiveRow{row("10", "35.3", "25.105", 1, "v1")}})
+	placed := l.placed(now, "")
+	a := stopArrivals(m, "C", &Board{Stop: "C", At: now - 60}, placed, now)
+	if len(a) != 1 || a[0].Live || a[0].Estimate || a[0].Trip != "7" {
+		t.Fatalf("empty board: %+v", a)
+	}
+	a = stopArrivals(m, "C", &Board{Stop: "C", At: now, Rows: []LiveRow{row("10", "35.3", "25.105", 4, "v1")}}, placed, now)
+	if len(a) != 1 || !a[0].Live || a[0].Estimate || a[0].At-now != 240 {
+		t.Fatalf("board row: %+v", a)
+	}
+}
+
+// Nothing later than 60 min is estimated.
+func TestEstimatesStopAtOneHour(t *testing.T) {
+	m := buildModel(lineRaw())
+	now := athensClock(time.Now().Unix()).Midnight + 36000 - 60
+	l := newLiveCity(m)
+	l.add(Board{Stop: "B", At: now, Rows: []LiveRow{row("10", "35.3", "25.105", 59, "v1")}})
+	placed := l.placed(now, "")
+	if a := estimated(stopArrivals(m, "B", nil, placed, now)); len(a) != 1 || a[0].At-now != 59*60 {
+		t.Fatalf("B in 59 min: %+v", a)
+	}
+	if a := estimated(stopArrivals(m, "C", nil, placed, now)); len(a) != 0 {
+		t.Fatalf("C in 61 min: %+v", a)
+	}
+}
+
+// A loop with no timetable: distance over the bus's speed. The bus is on its way out and due at C in
+// 3 min (1362 m, 7.6 m/s): B is 454 m ahead (1 min) and again 908 m after C (2 more min).
+func TestEstimatesOnALoopVisitTwiceByDistance(t *testing.T) {
+	m := buildModel(loopRaw())
+	now := int64(1_000_000)
+	l := newLiveCity(m)
+	l.add(Board{Stop: "C", At: now, Rows: []LiveRow{{LineCode: "L", RouteCode: "90", Latitude: 35.3, Longitude: 25.105, DepartureMins: 3, VehicleCode: "v"}}})
+	placed := l.placed(now, "")
+	a := stopArrivals(m, "B", nil, placed, now)
+	if len(a) != 2 || !a[0].Estimate || !a[1].Estimate || a[0].Vehicle != "v" || !near(a[0].At-now, 60) || !near(a[1].At-now, 300) {
+		t.Fatalf("B twice: %+v", a)
+	}
+	if a := stopArrivals(m, "C", nil, placed, now); len(a) != 1 || a[0].At-now != 180 {
+		t.Fatalf("C: %+v", a)
+	}
+	if a := stopArrivals(m, "A", nil, placed, now); len(a) != 0 {
+		t.Fatalf("A is behind the bus, and the trip ends there: %+v", a)
+	}
+}
+
+// A bus with no speed (too near its due stop to tell) is taken at 6 m/s.
+func TestEstimatesDefaultSpeed(t *testing.T) {
+	m := buildModel(loopRaw())
+	now := int64(1_000_000)
+	l := newLiveCity(m)
+	l.add(Board{Stop: "B", At: now, Rows: []LiveRow{{LineCode: "L", RouteCode: "90", Latitude: 35.3, Longitude: 25.1095, DepartureMins: 0, VehicleCode: "v"}}})
+	placed := l.placed(now, "")
+	if len(placed) != 1 || placed[0].S.Speed != nil {
+		t.Fatalf("placed %+v", placed)
+	}
+	if a := stopArrivals(m, "C", nil, placed, now); len(a) != 1 || !a[0].Estimate || !near(a[0].At-now, 151) {
+		t.Fatalf("C, 908 m after B at 6 m/s: %+v", a)
 	}
 }
