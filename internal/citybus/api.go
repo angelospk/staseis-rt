@@ -273,6 +273,15 @@ func (c *City) hasStop(code string) bool {
 	return c.model.Stops[code] != nil
 }
 
+// arrivalsLocked: the stop's arrivals; with no board to show, the tracked buses are estimated.
+func (c *City) arrivalsLocked(code string, b *Board, now int64) []Arrival {
+	var placed []Placed
+	if b == nil && c.live != nil {
+		placed = c.live.placed(now, "")
+	}
+	return stopArrivals(c.model, code, b, placed, now)
+}
+
 func (c *City) v1StopBoard(code string) obj {
 	if !c.hasStop(code) {
 		return nil
@@ -285,7 +294,7 @@ func (c *City) v1StopBoard(code string) obj {
 		return nil
 	}
 	arr := []obj{}
-	for _, a := range stopArrivals(c.model, code, b, now) {
+	for _, a := range c.arrivalsLocked(code, b, now) {
 		src := "schedule"
 		if a.Live {
 			src = "live"
@@ -295,7 +304,7 @@ func (c *City) v1StopBoard(code string) obj {
 			trip = a.Trip
 		}
 		arr = append(arr, obj{"line": a.Line, "headsign": a.Headsign, "variant": a.Route, "vehicle": a.Vehicle, "eta_s": a.At - now,
-			"at": a.At, "delay_s": 0, "position_at": a.Seen, "source": src, "trip_id": trip, "scheduled": a.Scheduled,
+			"at": a.At, "delay_s": 0, "position_at": a.Seen, "source": src, "estimate": a.Estimate, "trip_id": trip, "scheduled": a.Scheduled,
 			"stops_away": nil, "distance_m": nil})
 	}
 	return obj{"stop": obj{"id": code, "name": s.Name, "lat": s.Lat, "lon": s.Lon}, "lines": s.Lines, "usual": []any{},
@@ -320,7 +329,7 @@ func (c *City) v2StopBoard(id string) obj {
 		lines = append(lines, c.v2LineLocked(l))
 	}
 	arr := []obj{}
-	for _, a := range stopArrivals(c.model, code, b, now) {
+	for _, a := range c.arrivalsLocked(code, b, now) {
 		src, status := "timetable", "scheduled"
 		if a.Live {
 			src, status = "live", "running"
@@ -337,7 +346,7 @@ func (c *City) v2StopBoard(id string) obj {
 			vehicle = c.lid(a.Vehicle)
 		}
 		arr = append(arr, obj{"line": c.lid(a.Line), "stop": c.lid(code), "headsign": a.Headsign, "at": a.At, "scheduled_at": a.Scheduled,
-			"delay_s": nil, "source": src, "run": run, "vehicle": vehicle, "vehicle_label": nil, "platform": nil, "status": status})
+			"delay_s": nil, "source": src, "estimate": a.Estimate, "run": run, "vehicle": vehicle, "vehicle_label": nil, "platform": nil, "status": status})
 	}
 	return obj{"stop": c.v2StopLocked(code), "lines": lines, "usual": []any{}, "updated_at": now, "refreshing": refreshing,
 		"sources": c.sourcesLocked(), "arrivals": arr}

@@ -21,6 +21,15 @@ cities; `/` and `/{city}/debug` show the rotation state.
 - `/v2` ids are namespaced per city: `her:1235` (stop), `her:01` (line),
   `her:0932` (pattern), `her:run:<trip>:<YYYY-MM-DD>` (run). The bridge used `oasa:`.
 - `/v1` keeps bare codes, as in Athens.
+- A stop answer (`/v1/stops/{code}`, `/v2/stops/{id}`) never waits for citybus.gr (#136). With a
+  board of the stop in the cache (up to 120 s old) its rows are the live arrivals. With none, the
+  live arrivals are estimates from the buses the city already tracks, marked `"estimate": true`
+  (`source` stays `live`): the time the bus is due at the stop it was last seen heading for
+  (citybus.gr's own minutes) plus or minus the timetable's ride to the asked stop, or distance over
+  speed where the timetable has no times; up to 60 min ahead. `"refreshing": true` says a read of
+  the stop's own board is in flight: the client asks again in about 2 s, and the board then wins.
+  Measured on Kavala (2026-11-10, 165 bus-stop pairs against citybus.gr's own boards): median
+  error 23 s, 90 % within 53 s.
 - `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
   the city's current data (a sha256 of it, saved in `static.json`). A daily reload of the same data
   keeps it, so the bot's alerts and the web's stop index (`trips-<city>.json`) stay valid.
