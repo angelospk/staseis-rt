@@ -277,7 +277,7 @@ func (c *City) v1StopBoard(code string) obj {
 	if !c.hasStop(code) {
 		return nil
 	}
-	b := c.freshBoard(code)
+	b, refreshing := c.freshBoard(code)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s, now := c.model.Stops[code], c.unix()
@@ -299,7 +299,7 @@ func (c *City) v1StopBoard(code string) obj {
 			"stops_away": nil, "distance_m": nil})
 	}
 	return obj{"stop": obj{"id": code, "name": s.Name, "lat": s.Lat, "lon": s.Lon}, "lines": s.Lines, "usual": []any{},
-		"updated_at": now, "arrivals": arr}
+		"updated_at": now, "refreshing": refreshing, "arrivals": arr}
 }
 
 func (c *City) v2StopBoard(id string) obj {
@@ -307,7 +307,7 @@ func (c *City) v2StopBoard(id string) obj {
 	if !c.hasStop(code) {
 		return nil
 	}
-	b := c.freshBoard(code)
+	b, refreshing := c.freshBoard(code)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.model.Stops[code] == nil { // a daily reload took the stop out while the board was read
@@ -339,8 +339,8 @@ func (c *City) v2StopBoard(id string) obj {
 		arr = append(arr, obj{"line": c.lid(a.Line), "stop": c.lid(code), "headsign": a.Headsign, "at": a.At, "scheduled_at": a.Scheduled,
 			"delay_s": nil, "source": src, "run": run, "vehicle": vehicle, "vehicle_label": nil, "platform": nil, "status": status})
 	}
-	return obj{"stop": c.v2StopLocked(code), "lines": lines, "usual": []any{}, "updated_at": now, "sources": c.sourcesLocked(),
-		"arrivals": arr}
+	return obj{"stop": c.v2StopLocked(code), "lines": lines, "usual": []any{}, "updated_at": now, "refreshing": refreshing,
+		"sources": c.sourcesLocked(), "arrivals": arr}
 }
 
 var runRe = regexp.MustCompile(`^([a-z]+):run:([^:]+):(\d{4})-(\d{2})-(\d{2})$`)
