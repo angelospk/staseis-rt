@@ -703,3 +703,59 @@ func TestEstimatesByDistanceNeverFasterThanTheCap(t *testing.T) {
 		t.Fatalf("B: want 863 m at 15 m/s, not its share of the minute (29 s): %+v", a)
 	}
 }
+
+// A bus seen twice at the same point is standing: it is not moved on at a board speed (#139).
+func TestLiveCityStandingBusIsNotMovedOn(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	b := func(at int64) Board {
+		return Board{Stop: "D", At: at, Rows: []LiveRow{row("10", "35.3", "25.11", 2, "v")}}
+	}
+	l.add(b(1000))
+	if l.Buses["v"].Speed == nil {
+		t.Fatal("the first sighting keeps its board speed")
+	}
+	l.add(b(1030))
+	if l.Buses["v"].Speed != nil {
+		t.Fatalf("a bus at the same point 30 s later is standing: speed %v", *l.Buses["v"].Speed)
+	}
+	p := l.placed(1060, "")
+	if len(p) != 1 || p[0].M != l.Buses["v"].M || p[0].Kind != "gps" {
+		t.Fatalf("a standing bus stays at its sighting: %+v", p)
+	}
+}
+
+// A bus never goes back on the map: a new sighting behind the last shown point holds the bus
+// there; a sighting far behind (> 300 m) is taken as it is (#139).
+func TestLiveCityPlacedNeverGoesBack(t *testing.T) {
+	m := buildModel(lineRaw())
+	r := m.Routes["10"]
+	l := newLiveCity(m)
+	b := func(lon string, at int64) Board {
+		return Board{Stop: "D", At: at, Rows: []LiveRow{row("10", "35.3", lon, 2, "v")}}
+	}
+	l.add(b("25.11", 1000))
+	first := l.placed(1060, "")[0] // moved on at 15 m/s: ~900 m ahead of the sighting
+	l.add(b("25.118", 1070))       // ~170 m behind the shown point
+	held := l.placed(1070, "")[0]
+	if held.M < first.M {
+		t.Fatalf("went back from %.0f to %.0f", first.M, held.M)
+	}
+	if q := pointAt(r.Shape, r.Cum, held.M); held.Lat != q[0] || held.Lon != q[1] {
+		t.Fatalf("held point %v,%v is not the shape at %.0f", held.Lat, held.Lon, held.M)
+	}
+	l.add(b("25.10", 1080)) // far behind: a real reset
+	if p := l.placed(1080, "")[0]; p.M > 100 {
+		t.Fatalf("a sighting > 300 m behind is taken as it is: %.0f", p.M)
+	}
+}
+
+// The shown point is on the route's shape, also for a fresh GPS sighting off it (#139).
+func TestPlaceIsOnTheShape(t *testing.T) {
+	m := buildModel(lineRaw())
+	s := sightings(m, Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3004", "25.11", 2, "v")}})
+	p := place(m, s[0], 1000)
+	if p == nil || p.Kind != "gps" || p.Lat != 35.3 {
+		t.Fatalf("a GPS point 45 m off the shape is shown on it: %+v", p)
+	}
+}

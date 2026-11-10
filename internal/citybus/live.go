@@ -73,6 +73,17 @@ func finite(f float64) bool {
 // place returns where a bus is at time now: its sighting, moved on along the shape at its speed
 // (never past the stop it was due at, never on before it was due to leave a terminus).
 func place(mo *Model, s Sighting, now int64) *Placed {
+	return placeFrom(mo, s, now, -1)
+}
+
+// backHold is how far behind the last shown point a new sighting is held there (m); a sighting
+// further back is a real change and is shown as it is.
+const backHold = 300
+
+// placeFrom is place, but never behind floor (the metre last shown for this bus on this route;
+// -1 for none) unless the bus is more than backHold behind it. The point is always on the shape:
+// a raw GPS point next to it would make the bus jump sideways between gps and estimate.
+func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 	route := mo.Routes[s.Route]
 	if route == nil {
 		return nil
@@ -85,16 +96,16 @@ func place(mo *Model, s Sighting, now int64) *Placed {
 	if s.Speed != nil && age > 0 {
 		moved = math.Min(s.ToM, s.M+*s.Speed*float64(age))
 	}
+	if floor > moved && floor-moved <= backHold {
+		moved = floor
+	}
 	kind := "gps"
 	if moved-s.M > 30 {
 		kind = "estimate"
 	}
 	m := moved
-	lat, lon := s.Lat, s.Lon
-	if kind != "gps" {
-		q := pointAt(route.Shape, route.Cum, m)
-		lat, lon = q[0], q[1]
-	}
+	q := pointAt(route.Shape, route.Cum, m)
+	lat, lon := q[0], q[1]
 	nextIdx := -1
 	for i, x := range route.StopM {
 		if x > m+15 {
@@ -156,11 +167,26 @@ type liveCity struct {
 	model  *Model
 	Buses  map[string]Sighting
 	Boards map[string]Board
+	shown  map[string]shownAt // bus id -> where placed last showed it
+}
+
+// shownAt is the last point placed gave for a bus: its route and metre.
+type shownAt struct {
+	route string
+	m     float64
 }
 
 func newLiveCity(m *Model) *liveCity {
-	return &liveCity{model: m, Buses: map[string]Sighting{}, Boards: map[string]Board{}}
+	return &liveCity{model: m, Buses: map[string]Sighting{}, Boards: map[string]Board{}, shown: map[string]shownAt{}}
 }
+
+// standStill: a new sighting less than this far (m) from the last one of the bus, at least
+// standSecs later, means the bus stands (a stop, a light, a terminus): it is not moved on at the
+// board's speed, which would show it ahead and then pull it back at the next sighting.
+const (
+	standStill = 15
+	standSecs  = 20
+)
 
 func (l *liveCity) add(b Board) []Sighting {
 	l.Boards[b.Stop] = b
@@ -169,6 +195,9 @@ func (l *liveCity) add(b Board) []Sighting {
 		old, ok := l.Buses[s.ID]
 		// Newer wins; at the same time, the board of the nearer stop (its minutes are surer).
 		if !ok || s.Seen > old.Seen || (s.Seen == old.Seen && s.ToM-s.M < old.ToM-old.M) {
+			if ok && s.Route == old.Route && s.Seen-old.Seen >= standSecs && math.Abs(s.M-old.M) < standStill {
+				s.Speed = nil
+			}
 			l.Buses[s.ID] = s
 		}
 	}
@@ -181,6 +210,11 @@ func (l *liveCity) prune(now int64) {
 			delete(l.Buses, id)
 		}
 	}
+	for id := range l.shown {
+		if _, ok := l.Buses[id]; !ok {
+			delete(l.shown, id)
+		}
+	}
 	for k, b := range l.Boards {
 		if now-b.At > MaxAge {
 			delete(l.Boards, k)
@@ -190,9 +224,17 @@ func (l *liveCity) prune(now int64) {
 
 func (l *liveCity) placed(now int64, line string) []Placed {
 	out := []Placed{}
-	for _, s := range l.Buses {
-		p := place(l.model, s, now)
-		if p != nil && (line == "" || p.Route.Line == line) {
+	for id, s := range l.Buses {
+		floor := -1.0
+		if last, ok := l.shown[id]; ok && last.route == s.Route {
+			floor = last.m
+		}
+		p := placeFrom(l.model, s, now, floor)
+		if p == nil {
+			continue
+		}
+		l.shown[id] = shownAt{route: s.Route, m: p.M}
+		if line == "" || p.Route.Line == line {
 			out = append(out, *p)
 		}
 	}
