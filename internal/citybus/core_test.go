@@ -759,3 +759,59 @@ func TestPlaceIsOnTheShape(t *testing.T) {
 		t.Fatalf("a GPS point 45 m off the shape is shown on it: %+v", p)
 	}
 }
+
+// Boards come every ~10 s: a bus standing for 20 s over several sightings is standing (#139, review).
+func TestLiveCityStandingOverShortSightings(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	at := func(lon string, ts int64) {
+		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", lon, 2, "v")}})
+	}
+	at("25.11", 1000)
+	at("25.11", 1010)
+	if l.Buses["v"].Speed == nil {
+		t.Fatal("10 s at one point is not standing yet")
+	}
+	at("25.11", 1020)
+	at("25.11", 1030)
+	if l.Buses["v"].Speed != nil {
+		t.Fatal("30 s at one point over 10 s sightings is standing")
+	}
+	at("25.112", 1040) // it moves on (~180 m)
+	if l.Buses["v"].Speed == nil {
+		t.Fatal("a bus that moves on gets its board speed back")
+	}
+}
+
+// A standing bus that an estimate had moved on is shown back at its point, not held ahead (#139, review).
+func TestLiveCityStandingBusIsNotHeldAhead(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	at := func(ts int64) {
+		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", "25.11", 2, "v")}})
+	}
+	at(1000)
+	l.placed(1015, "") // moved on ~225 m
+	at(1010)
+	l.placed(1019, "")
+	at(1020)
+	if p := l.placed(1020, ""); p[0].M != l.Buses["v"].M {
+		t.Fatalf("standing bus held ahead at %.0f, its point is %.0f", p[0].M, l.Buses["v"].M)
+	}
+}
+
+// The held point never passes the stop the newest board says the bus is still due at (#139, review).
+func TestLiveCityHoldStopsBeforeTheDueStop(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.11", 2, "v")}})
+	l.placed(1060, "")                                                                      // moved on to ~1808 m, just before C (~1815 m)
+	l.add(Board{Stop: "C", At: 1070, Rows: []LiveRow{row("10", "35.3", "25.118", 1, "v")}}) // due at C still
+	p := l.placed(1070, "")[0]
+	if p.M > l.Buses["v"].ToM-15 {
+		t.Fatalf("held at %.0f, past the due stop at %.0f", p.M, l.Buses["v"].ToM)
+	}
+	if a := estimates("C", []Placed{p}, 1070); len(a) != 1 {
+		t.Fatalf("stop C is still due: %+v", a)
+	}
+}

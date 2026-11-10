@@ -180,8 +180,8 @@ func newLiveCity(m *Model) *liveCity {
 	return &liveCity{model: m, Buses: map[string]Sighting{}, Boards: map[string]Board{}, shown: map[string]shownAt{}}
 }
 
-// standStill: a new sighting less than this far (m) from the last one of the bus, at least
-// standSecs later, means the bus stands (a stop, a light, a terminus): it is not moved on at the
+// standStill: sightings of a bus less than this far (m) apart, for standSecs or more (boards come
+// every ~10 s, so over several sightings), mean the bus stands (a stop, a light, a terminus): it is not moved on at the
 // board's speed, which would show it ahead and then pull it back at the next sighting.
 const (
 	standStill = 15
@@ -195,7 +195,14 @@ func (l *liveCity) add(b Board) []Sighting {
 		old, ok := l.Buses[s.ID]
 		// Newer wins; at the same time, the board of the nearer stop (its minutes are surer).
 		if !ok || s.Seen > old.Seen || (s.Seen == old.Seen && s.ToM-s.M < old.ToM-old.M) {
-			if ok && s.Route == old.Route && s.Seen-old.Seen >= standSecs && math.Abs(s.M-old.M) < standStill {
+			s.Since = s.Seen
+			if ok && s.Route == old.Route && math.Abs(s.M-old.M) < standStill {
+				s.Since = old.Seen
+				if old.Since != 0 {
+					s.Since = old.Since
+				}
+			}
+			if s.Seen-s.Since >= standSecs {
 				s.Speed = nil
 			}
 			l.Buses[s.ID] = s
@@ -226,8 +233,10 @@ func (l *liveCity) placed(now int64, line string) []Placed {
 	out := []Placed{}
 	for id, s := range l.Buses {
 		floor := -1.0
-		if last, ok := l.shown[id]; ok && last.route == s.Route {
-			floor = last.m
+		// Only a moving bus is held: a standing one is shown at its point. Never past the stop
+		// the newest board says it is still due at.
+		if last, ok := l.shown[id]; ok && last.route == s.Route && s.Speed != nil {
+			floor = math.Min(last.m, s.ToM-20)
 		}
 		p := placeFrom(l.model, s, now, floor)
 		if p == nil {

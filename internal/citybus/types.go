@@ -206,6 +206,7 @@ type Sighting struct {
 	ToM    float64 // its metre
 	ETA    int64   // unix s due there
 	Speed  *float64
+	Since  int64 // unix s the bus was first seen at this point (within standStill); 0 is Seen
 }
 
 // Placed is where a bus is at a given time.
