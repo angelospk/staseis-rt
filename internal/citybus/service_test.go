@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -770,7 +771,7 @@ func TestUserBoardAskedOncePer15sEvenWhenItFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 3 {
-		if b := c.freshBoard("B"); b != nil {
+		if b, _ := c.freshBoard("B"); b != nil {
 			t.Fatalf("board %v", b)
 		}
 	}
@@ -915,7 +916,7 @@ func TestConcurrentUserReadsShareOneRequest(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if c.freshBoard("B") == nil {
+			if b, _ := c.freshBoard("B"); b == nil {
 				nils.Add(1)
 			}
 		}()
@@ -996,4 +997,185 @@ func TestStaticVersionFromAnOldFile(t *testing.T) {
 	if v := c.status()["gtfs_version"]; v != "2026-11-06" {
 		t.Fatalf("version %q, want 2026-11-06", v)
 	}
+}
+
+// ---- fast stop boards (Harold, 2026-11-10): a stale board at once, hub stops every 30 s ----
+
+// A board up to MaxAge (120 s) old shows at once; one read for a new one runs behind it.
+func TestStaleBoardShownAtOnceAndRefreshedBehind(t *testing.T) {
+	var calls atomic.Int32
+	f := &fake{answers: answersOf(lineRaw())}
+	f.hook = func(path string) (any, bool, error) {
+		if strings.Contains(path, "/stops/live/") {
+			calls.Add(1)
+			time.Sleep(150 * time.Millisecond)
+			return liveAnswer{Vehicles: []LiveRow{}}, true, nil
+		}
+		return nil, false, nil
+	}
+	c := testCity(t, f, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	old := c.unix() - 60
+	c.mu.Lock()
+	c.live.Boards["B"] = Board{Stop: "B", At: old}
+	c.mu.Unlock()
+	t0 := time.Now()
+	b, refreshing := c.freshBoard("B")
+	if time.Since(t0) > 50*time.Millisecond || b == nil || b.At != old || !refreshing {
+		t.Fatalf("board %+v refreshing %v after %v", b, refreshing, time.Since(t0))
+	}
+	// A second caller meanwhile: the same stale board, no second read.
+	if b2, r2 := c.freshBoard("B"); b2 == nil || b2.At != old || !r2 {
+		t.Fatalf("second caller %+v %v", b2, r2)
+	}
+	time.Sleep(250 * time.Millisecond)
+	c.mu.Lock()
+	at := c.live.Boards["B"].At
+	c.mu.Unlock()
+	if calls.Load() != 1 || at <= old {
+		t.Fatalf("calls %d, board at %d (was %d)", calls.Load(), at, old)
+	}
+	if b3, r3 := c.freshBoard("B"); b3 == nil || b3.At <= old || r3 {
+		t.Fatalf("after the read %+v %v", b3, r3)
+	}
+}
+
+// The HTTP answer says when a new board is on its way, so the client asks again soon.
+func TestStopAnswerSaysRefreshing(t *testing.T) {
+	f := &fake{answers: answersOf(lineRaw())}
+	f.hook = func(path string) (any, bool, error) {
+		if strings.Contains(path, "/stops/live/") {
+			time.Sleep(100 * time.Millisecond)
+			return liveAnswer{Vehicles: []LiveRow{}}, true, nil
+		}
+		return nil, false, nil
+	}
+	c := testCity(t, f, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.live.Boards["B"] = Board{Stop: "B", At: c.unix() - 60}
+	c.mu.Unlock()
+	if v1 := c.v1StopBoard("B"); v1 == nil || v1["refreshing"] != true {
+		t.Fatalf("v1 %v", v1)
+	}
+	if v2 := c.v2StopBoard("t:B"); v2 == nil || v2["refreshing"] != true {
+		t.Fatalf("v2 %v", v2)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if v1 := c.v1StopBoard("B"); v1 == nil || v1["refreshing"] != false {
+		t.Fatalf("v1 after %v", v1)
+	}
+}
+
+// The hub stops: the most lines first, then the most routes, then the code; at least 2 lines.
+func TestHubStopsMostLinesFirst(t *testing.T) {
+	m := &Model{Stops: map[string]*Stop{
+		"a": {Code: "a", Lines: []string{"1", "2", "3"}},
+		"b": {Code: "b", Lines: []string{"1", "2", "3", "4"}},
+		"c": {Code: "c", Lines: []string{"1", "2"}},
+		"d": {Code: "d", Lines: []string{"1", "2"}},
+		"e": {Code: "e", Lines: []string{"1"}},
+	}, Routes: map[string]*Route{
+		"r1": {Code: "r1", Stops: []string{"d", "c"}},
+		"r2": {Code: "r2", Stops: []string{"d"}},
+	}}
+	if got := hubStops(m, 3); !reflect.DeepEqual(got, []string{"b", "a", "d"}) {
+		t.Fatalf("hubs %v", got)
+	}
+	if got := hubStops(m, 10); !reflect.DeepEqual(got, []string{"b", "a", "d", "c"}) {
+		t.Fatalf("hubs %v (a 1-line stop is no hub)", got)
+	}
+}
+
+// A hub is read when its board is 30 s old (or it has none), once in 30 s, in turn.
+func TestDueHubEvery30s(t *testing.T) {
+	c := testCity(t, &fake{answers: answersOf(lineRaw())}, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Unix(1_800_000_000, 0)
+	c.now = func() time.Time { return clock }
+	now := c.unix()
+	c.mu.Lock()
+	c.hubs = []string{"B", "C", "D"}
+	c.live.Boards["C"] = Board{Stop: "C", At: now - 10} // fresh: not due
+	c.mu.Unlock()
+	if h := c.dueHub(now); h != "B" {
+		t.Fatalf("first %q", h)
+	}
+	if h := c.dueHub(now); h != "D" {
+		t.Fatalf("second %q", h)
+	}
+	if h := c.dueHub(now); h != "" {
+		t.Fatalf("third %q", h)
+	}
+	if h := c.dueHub(now + 25); h != "C" { // C's board is 35 s old now
+		t.Fatalf("C at +25: %q", h)
+	}
+	if h := c.dueHub(now + 30); h != "B" {
+		t.Fatalf("B again at +30: %q", h)
+	}
+}
+
+// The hub reads count in the pace: two a minute each, as if they were probes.
+func TestHubsCountInTheGap(t *testing.T) {
+	c := testCity(t, &fake{answers: answersOf(linesRaw("1", "2", "3", "4", "5", "6", "7", "8"))}, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	want := gapFor(len(c.probes) + len(c.skipped) + 1 + 2*len(c.hubs))
+	if got := int(c.up.pacer().gapNow() / time.Millisecond); got != want {
+		t.Fatalf("gap %d want %d (probes %d hubs %d)", got, want, len(c.probes), len(c.hubs))
+	}
+}
+
+// A board older than MaxAge that prune has not dropped yet is never shown: the user waits for a new one.
+func TestBoardOverMaxAgeIsNotShown(t *testing.T) {
+	f := &fake{answers: answersOf(lineRaw())}
+	f.hook = func(path string) (any, bool, error) {
+		if strings.Contains(path, "/stops/live/") {
+			return liveAnswer{Vehicles: []LiveRow{}}, true, nil
+		}
+		return nil, false, nil
+	}
+	c := testCity(t, f, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	old := c.unix() - MaxAge - 5
+	c.mu.Lock()
+	c.live.Boards["B"] = Board{Stop: "B", At: old}
+	c.mu.Unlock()
+	if b, r := c.freshBoard("B"); b == nil || b.At <= old || r {
+		t.Fatalf("board %+v refreshing %v", b, r)
+	}
+}
+
+// A user who gave up waiting hears that the read goes on, so the client asks again soon (codex).
+func TestBoardWaitOverSaysRefreshing(t *testing.T) {
+	old := boardWait
+	boardWait = 20 * time.Millisecond
+	defer func() { boardWait = old }()
+	f := &fake{answers: answersOf(lineRaw())}
+	f.hook = func(path string) (any, bool, error) {
+		if strings.Contains(path, "/stops/live/") {
+			time.Sleep(150 * time.Millisecond)
+			return liveAnswer{Vehicles: []LiveRow{}}, true, nil
+		}
+		return nil, false, nil
+	}
+	c := testCity(t, f, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if b, r := c.freshBoard("B"); b != nil || !r {
+		t.Fatalf("board %+v refreshing %v", b, r)
+	}
+	time.Sleep(200 * time.Millisecond)
 }
