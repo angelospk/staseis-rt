@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/angelospk/athens-transit-rt/internal/history"
 )
 
 // maxInflight: stop boards waiting for an answer at once, per city.
@@ -109,6 +111,16 @@ type City struct {
 	lastCycle   cycleStats
 	healthSaved int64
 	checkRound  int
+
+	runs     *runLog            // the day's timetable runs seen (rt#141)
+	hist     *history.Writer    // fix history; nil = off (rt#142)
+	histLast map[string]histFix // vehicle code -> last row written (lat, lon, unix s)
+}
+
+// histFix is the last history row of one vehicle: where it was and when.
+type histFix struct {
+	Lat, Lon float64
+	At       int64
 }
 
 func newCity(conf Conf, up fetcher, stateDir string, log *slog.Logger) (*City, error) {
@@ -120,6 +132,8 @@ func newCity(conf Conf, up fetcher, stateDir string, log *slog.Logger) (*City, e
 		checkProbes: map[string][]string{}, skipped: map[string]bool{}, watched: map[string]int64{}, hotAsked: map[string]int64{}, hubAsked: map[string]int64{}, userAsked: map[string]int64{}, userWait: map[string]bool{},
 		svc: context.Background(), boards: make(chan struct{}, maxInflight)}
 	c.health = loadHealth(filepath.Join(dir, "health.json"), c.unix())
+	c.runs = loadRuns(filepath.Join(dir, "runs.json"), c.unix())
+	c.histLast = map[string]histFix{}
 	return c, nil
 }
 
@@ -379,6 +393,8 @@ func (c *City) board(ctx context.Context, stop string, pri Priority) (Board, err
 			if r := c.model.Routes[s.Route]; r != nil {
 				c.health.saw(r.Line, b.At)
 			}
+			c.runs.note(c.model, s)
+			c.writeFixLocked(s)
 		}
 	}
 	if b.At-c.healthSaved >= 60 {
@@ -386,8 +402,42 @@ func (c *City) board(ctx context.Context, stop string, pri Priority) (Board, err
 		if err := c.health.save(); err != nil {
 			c.log.Warn("health.json not written", "err", err)
 		}
+		if err := c.runs.save(b.At); err != nil {
+			c.log.Warn("runs.json not written", "err", err)
+		}
 	}
 	return b, nil
+}
+
+// writeFixLocked queues a sighting as a history row, unless the last row of that bus has the same
+// place and is under a minute old, or is of the same second (the writer keeps one row per vehicle
+// per second: a place it would drop must not count as written). Add never blocks.
+func (c *City) writeFixLocked(s Sighting) {
+	route := c.model.Routes[s.Route]
+	if c.hist == nil || route == nil {
+		return
+	}
+	if last, ok := c.histLast[s.ID]; ok && (s.Seen <= last.At || last.Lat == s.Lat && last.Lon == s.Lon && s.Seen-last.At < 60) {
+		return
+	}
+	c.histLast[s.ID] = histFix{Lat: s.Lat, Lon: s.Lon, At: s.Seen}
+	trip := ""
+	if t, _, _ := c.runOfRoute(route, s.ID); t != nil {
+		trip = t.ID
+	}
+	c.hist.Add(history.Row{FixT: s.Seen, Line: c.lid(route.Line), RouteCode: s.Route, Veh: c.lid(s.ID),
+		Lat: s.Lat, Lon: s.Lon, GTFS: c.model.Version, TripID: trip, SM: history.SM(s.M)})
+}
+
+// flush writes the run log now (a clean stop keeps the last minute's runs).
+func (c *City) flush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.runs != nil {
+		if err := c.runs.save(c.unix()); err != nil {
+			c.log.Warn("runs.json not written", "err", err)
+		}
+	}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) {
@@ -552,6 +602,12 @@ func (c *City) prune() {
 	c.mu.Lock()
 	if c.live != nil {
 		c.live.prune(c.unix())
+	}
+	now := c.unix()
+	for id, f := range c.histLast {
+		if now-f.At > MaxAge {
+			delete(c.histLast, id)
+		}
 	}
 	c.mu.Unlock()
 }

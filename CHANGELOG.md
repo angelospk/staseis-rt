@@ -15,6 +15,15 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
   position older than 120 s, line health per city (`/{city}/v1/health`). Staging only; see
   [docs/citybus.md](docs/citybus.md) ([#103](https://github.com/angelospk/athens-transit-rt/issues/103)).
 
+- citybus.gr cities: the run of a bus is read from its vehicle code (`20261110_4_0100000_17_20`:
+  the 17:20 run of route 4). `/v1/lines/{code}/schedule` marks a run a bus was seen on with
+  `seen: true`, and with `live: true` while the bus is there; `seen: false` is no longer sent (it
+  made every run look missed). Vehicles get `trip_id`, `trip_label` (v1) and `run` (v2);
+  `/v2/runs/{id}` says `running` with its `vehicle`
+  ([#141](https://github.com/angelospk/staseis-rt/issues/141)).
+- citybus.gr cities: `--history` keeps the sightings of every city in `<state>/history`, in the
+  fix-history CSV format ([#142](https://github.com/angelospk/staseis-rt/issues/142)).
+
 ### Statistics
 - The `trips` block of the daily stats plans from OASA's daily schedule when the static GTFS has
   expired: one planned trip per OASA run, paired with the buses that left near its time, instead

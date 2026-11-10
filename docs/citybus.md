@@ -30,6 +30,35 @@ cities; `/` and `/{city}/debug` show the rotation state.
   the stop's own board is in flight: the client asks again in about 2 s, and the board then wins.
   Measured on Kavala (2026-11-10, 381 bus-stop pairs against citybus.gr's own boards): median
   error 22 s, 90 % within 52 s, the worst 95 s.
+- Runs seen (#141). A citybus.gr vehicle code names a trip slot, not a bus:
+  `20261110_4_0100000_17_20` is the 17:20 run of route 4 on 2026-11-10 (the route part has `_` for
+  `-`: Katerini `0121-0` is `0121_0`). Some codes are a device id (a long number): those buses have
+  no run. The run of a bus is read from its code and looked up in the timetable by route, weekday
+  and first-stop time; there is no matching by time. Measured on 2026-11-10: 238 of 250 codes
+  (21 cities) have the form, 232 of them name a trip of the timetable; on 220 stop-board rows a
+  match by time alone named the same trip in only 91 %.
+  - A run counts as seen when a bus with its code is 100 m past the first timed stop (along the
+    shape and in a straight line), from 2 min before the departure to 45 min after the run's last
+    time. A bus at the terminus, or one that carries the code of a later run (seen up to 82 min
+    ahead), does not count. Times are seconds after the service day's base (Athens noon minus
+    12 h, as the timetable's).
+  - `/v1/lines/{code}/schedule`: `"seen": true` on a run seen today, and `"live": true` while its
+    bus was sighted in the last 120 s. A run not seen has no `seen` key: only some buses show (device
+    ids, no GPS), so `false` (missed) is never sent. Two trips of one route with one first-stop time:
+    the first one takes the mark. Cached 60 s, less when a live run or the day is about to end.
+  - `/v1/lines/{code}` vehicles: `trip_id` and `trip_label` (`"17:20 FIRST STOP → LAST STOP"`; with
+    a code time that is no trip of the timetable: no `trip_id`, the label from the code and the
+    route's ends). `/v2/lines/{id}/vehicles`: `run`. `/v2/runs/{id}`: `vehicle` and
+    `status: "running"` while the run is live as above. `delay_s` stays null.
+  - The runs seen are kept per city in `<state>/<slug>/runs.json` (key `date|route|HH:MM`, yesterday
+    and today), saved once a minute and on a clean stop.
+- Sighting history (#142): `--history` (with `--history-max-mb`, `--history-days`, as in Athens)
+  writes the sightings of every city to one fix history in `<state>/history`, in the CSV format of
+  `internal/history` (hourly files, gzipped, pruned by size and age). One row per sighting when
+  the bus moved or 60 s passed, at most one per vehicle per second. `line` and `veh` carry the
+  city code (`cfu:2A`, `cfu:20261110_4_0100000_17_20`: codes repeat across cities), `fix_t` is the
+  time the board was read, `trip_id` the run from the code (empty when none), `s_m` the metre on
+  the route shape; `shape_id`, `delay_s`, `run_start`, `start_delay_s` are empty. Off by default.
 - `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
   the city's current data (a sha256 of it, saved in `static.json`). A daily reload of the same data
   keeps it, so the bot's alerts and the web's stop index (`trips-<city>.json`) stay valid.
