@@ -928,3 +928,26 @@ func TestLiveCityBusJustBeforeAStopWaitsThere(t *testing.T) {
 		t.Fatalf("went back from %.0f to %.0f", first.M, p.M)
 	}
 }
+
+// The client drives the dot on from the last point shown; a new board with the same GPS point
+// (the bus not yet standing) must not put it back behind where the client got to (#145, review 2).
+func TestLiveCityHoldMovesOnWithTheClient(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	b := func(at int64) Board {
+		return Board{Stop: "D", At: at, Rows: []LiveRow{row("10", "35.3", "25.1", 2, "v")}} // 0 m, B at ~908 m
+	}
+	l.add(b(1000))
+	first := l.placed(1000, "")[0]
+	l.add(b(1010)) // same point 10 s later: not standing yet
+	if l.Buses["v"].Speed == nil {
+		t.Fatal("10 s at one point is not standing yet")
+	}
+	p := l.placed(1010, "")[0]
+	if v := *l.Buses["v"].Speed; p.M < first.M+0.8*v*10 {
+		t.Fatalf("shown at %.0f; the client drove on from %.0f at %.1f m/s for 10 s", p.M, first.M, v)
+	}
+	if p.M > 908-20+1 {
+		t.Fatalf("shown at %.0f, past B", p.M)
+	}
+}
