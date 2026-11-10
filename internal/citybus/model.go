@@ -152,13 +152,11 @@ func buildModel(raw *RawCity) *Model {
 				}
 			}
 			cum := cumulative(shape)
-			stopM := make([]float64, len(seq))
-			prev := 0.0
+			pts := make([]LL, len(seq))
 			for i, c := range seq {
-				s := stops[c]
-				prev = project(shape, cum, LL{s.Lat, s.Lon}, prev).M
-				stopM[i] = prev
+				pts[i] = LL{stops[c].Lat, stops[c].Lon}
 			}
+			stopM := stopMetres(shape, cum, pts)
 			byTrip := make(map[int64][]RawTripRow)
 			order := []int64{}
 			for _, row := range raw.Trips[r.Code] {

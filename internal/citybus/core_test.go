@@ -465,3 +465,81 @@ func TestOnePointShapeFallsBackToStops(t *testing.T) {
 		t.Fatalf("shape %v stopM %v", r.Shape, r.StopM)
 	}
 }
+
+// Kavala 04 (2026-11-10): a loop whose shape starts ~27 m from its first stop and ends ~9 m from it.
+// The first stop must sit at the start, not at the end with every later stop squeezed after it.
+func TestLoopFirstStopNearerTheShapeEnd(t *testing.T) {
+	raw := loopRaw()
+	raw.Points["L"][0].RoutePoints = []RawPoint{
+		{Sequence: 0, Latitude: 35.3, Longitude: 25.1003}, {Sequence: 1, Latitude: 35.3, Longitude: 25.12},
+		{Sequence: 2, Latitude: 35.3, Longitude: 25.1001}}
+	r := buildModel(raw).Routes["90"]
+	if r.StopM[0] > 50 {
+		t.Fatalf("first stop at %v m of %v: stopM %v", r.StopM[0], r.Cum[len(r.Cum)-1], r.StopM)
+	}
+	for i := 1; i < len(r.StopM); i++ {
+		if r.StopM[i] <= r.StopM[i-1] {
+			t.Fatalf("stopM %v", r.StopM)
+		}
+	}
+	if r.StopM[2] < 1700 || r.StopM[2] > 1850 { // C, the turn, ~1790 m along
+		t.Fatalf("C at %v: stopM %v", r.StopM[2], r.StopM)
+	}
+}
+
+// Out along one street and back along the next (11 m apart). B is 2 m from the way back and 9 m
+// from the way out: the nearest point alone puts it on the way back and squeezes C after it.
+func TestStopNearerTheWayBackStaysOnTheWayOut(t *testing.T) {
+	var stops []RawStop
+	for _, s := range []struct {
+		c        string
+		lat, lon float64
+	}{{"A", 35.3, 25.1}, {"B", 35.30008, 25.11}, {"C", 35.3, 25.12}, {"D", 35.3001, 25.105}} {
+		stops = append(stops, RawStop{Code: s.c, Name: s.c, Latitude: Num(s.lat), Longitude: Num(s.lon), LineCodes: []string{"L"}, RouteCodes: []string{"91"}})
+	}
+	var seq []RawSeq
+	for i, c := range []string{"A", "B", "C", "D"} {
+		seq = append(seq, RawSeq{Sequence: i + 1, Code: c})
+	}
+	raw := &RawCity{
+		Lines:     []RawLine{{Code: "L", Name: "OUT AND BACK", Color: "#000000", TextColor: "#ffffff", Routes: []RawRouteRef{{Code: "91", Name: "X", Direction: 1}}}},
+		Stops:     stops,
+		Sequences: map[string][]RawSeq{"91": seq},
+		Points: map[string][]RawPoints{"L": {{RouteCode: "91", RoutePoints: []RawPoint{
+			{Sequence: 0, Latitude: 35.3, Longitude: 25.1}, {Sequence: 1, Latitude: 35.3, Longitude: 25.12},
+			{Sequence: 2, Latitude: 35.3001, Longitude: 25.12}, {Sequence: 3, Latitude: 35.3001, Longitude: 25.1}}}}},
+	}
+	r := buildModel(raw).Routes["91"]
+	if r.StopM[1] < 850 || r.StopM[1] > 960 { // B on the way out, ~908 m
+		t.Fatalf("B at %v: stopM %v", r.StopM[1], r.StopM)
+	}
+	if r.StopM[2] < 1750 || r.StopM[2] > 1850 || r.StopM[3] < 3150 || r.StopM[3] > 3230 {
+		t.Fatalf("stopM %v", r.StopM)
+	}
+}
+
+// No order fits (the stops run against the shape): the old nearest-point walk still gives growing metres.
+func TestStopsAgainstTheShapeFallBack(t *testing.T) {
+	raw := lineRaw()
+	raw.Points["1"][0].RoutePoints = []RawPoint{{Sequence: 1, Latitude: 35.3, Longitude: 25.14}, {Sequence: 2, Latitude: 35.3, Longitude: 25.1}}
+	r := buildModel(raw).Routes["10"]
+	if len(r.StopM) != 5 {
+		t.Fatalf("stopM %v", r.StopM)
+	}
+	for i := 1; i < len(r.StopM); i++ {
+		if r.StopM[i] < r.StopM[i-1] {
+			t.Fatalf("stopM %v", r.StopM)
+		}
+	}
+}
+
+// Out and back on one street; three stops each ~4 m against the way out (codex review). Clamping a
+// stop up to the one before it must not cut the chain: all three stay on one pass, not split.
+func TestStopsSlightlyBackStayOnOnePass(t *testing.T) {
+	shape := []LL{{35.3, 25.1}, {35.3, 25.12}, {35.3, 25.1}}
+	cum := cumulative(shape)
+	m := stopMetres(shape, cum, []LL{{35.3, 25.11}, {35.3, 25.10996}, {35.3, 25.10992}})
+	if math.Abs(m[2]-m[0]) > 50 || m[1] < m[0] || m[2] < m[1] {
+		t.Fatalf("stopM %v", m)
+	}
+}
