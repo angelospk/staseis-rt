@@ -157,3 +157,68 @@ func tileOf(lat, lon float64, z int) (x, y int) {
 	y = int(math.Floor((1 - math.Asinh(math.Tan(lat*degRad))/math.Pi) / 2 * n))
 	return x, y
 }
+
+// stopMetres places a route's stops along its shape, in order. Each stop may sit on any pass of
+// the shape near it (candidates); the stops are fitted together, so their metres never fall back
+// and the sum of their distances off the shape is least. The nearest point of each stop alone
+// fails on a loop whose first stop is nearer the shape's end, or a stop nearer the way back of a
+// street: it lands on the later pass and squeezes every later stop to the end. When no order
+// fits (stops against the shape), it falls back to that walk. A chain keeps each stop's own
+// metres, so a stop a few metres back never blocks the next; the metres are made to grow at the end.
+func stopMetres(shape []LL, cum []float64, pts []LL) []float64 {
+	const back = 5.0 // metres a stop may sit before the previous one (two stops at one point)
+	type node struct {
+		m, cost float64
+		from    int
+	}
+	steps := make([][]node, len(pts))
+	for k, p := range pts {
+		for _, c := range candidates(shape, cum, p, 150) {
+			n := node{m: c.M, cost: math.Inf(1), from: -1}
+			if k == 0 {
+				n.cost = c.Off
+			}
+			for j, q := range steps[max(0, k-1)] {
+				if k == 0 || q.m > c.M+back || math.IsInf(q.cost, 1) {
+					continue
+				}
+				if q.cost+c.Off < n.cost {
+					n.cost, n.from = q.cost+c.Off, j
+				}
+			}
+			if !math.IsInf(n.cost, 1) {
+				steps[k] = append(steps[k], n)
+			}
+		}
+		if len(steps[k]) == 0 {
+			return walkStops(shape, cum, pts)
+		}
+	}
+	best := 0
+	last := steps[len(pts)-1]
+	for j := range last {
+		if last[j].cost < last[best].cost {
+			best = j
+		}
+	}
+	out := make([]float64, len(pts))
+	for k := len(pts) - 1; k >= 0; k-- {
+		out[k] = steps[k][best].m
+		best = steps[k][best].from
+	}
+	for k := 1; k < len(out); k++ {
+		out[k] = math.Max(out[k], out[k-1])
+	}
+	return out
+}
+
+// walkStops: each stop at its nearest point from the previous stop on.
+func walkStops(shape []LL, cum []float64, pts []LL) []float64 {
+	out := make([]float64, len(pts))
+	prev := 0.0
+	for i, p := range pts {
+		prev = project(shape, cum, p, prev).M
+		out[i] = prev
+	}
+	return out
+}
