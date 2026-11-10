@@ -935,7 +935,7 @@ func TestLiveCityHoldMovesOnWithTheClient(t *testing.T) {
 	m := buildModel(lineRaw())
 	l := newLiveCity(m)
 	b := func(at int64) Board {
-		return Board{Stop: "D", At: at, Rows: []LiveRow{row("10", "35.3", "25.1", 2, "v")}} // 0 m, B at ~908 m
+		return Board{Stop: "D", At: at, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}} // ~454 m, B at ~908 m
 	}
 	l.add(b(1000))
 	first := l.placed(1000, "")[0]
