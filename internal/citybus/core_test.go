@@ -186,8 +186,13 @@ func TestSightingsPlaceAndMaxAge(t *testing.T) {
 		t.Fatalf("placed now %+v", now)
 	}
 	later := place(m, s[0], 1120)
-	if later.Kind != "estimate" || later.M <= s[0].ToM-30 || later.M > s[0].ToM {
-		t.Fatalf("later %v (to %v)", later.M, s[0].ToM)
+	// The estimate reaches the board's stop D; the map waits 15 s at B, which the bus is seen at,
+	// then goes on at half speed (#145).
+	if later.EstM <= s[0].ToM-30 || later.EstM > s[0].ToM {
+		t.Fatalf("later est %v (to %v)", later.EstM, s[0].ToM)
+	}
+	if want := s[0].M + 7.5*105; later.Kind != "estimate" || math.Abs(later.M-want) > 1 {
+		t.Fatalf("later shown at %v (%s), want %v", later.M, later.Kind, want)
 	}
 	if later.At != 1120 || now.At != 1000 {
 		t.Fatalf("at: gps keeps the sighting time, estimate is now: %d %d", now.At, later.At)
@@ -329,10 +334,15 @@ func TestLoopBusOnTheWayBack(t *testing.T) {
 
 func TestMotionStopsAtDueStop(t *testing.T) {
 	m := buildModel(lineRaw())
-	s := sightings(m, Board{Stop: "C", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.11", 2, "v")}})[0]
+	s := sightings(m, Board{Stop: "C", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.1105", 2, "v")}})[0] // ~45 m past B
 	mo := motion(place(m, s, 1000))
-	if len(mo.PathStops) == 0 || mo.PathStops[len(mo.PathStops)-1] > int(math.Round(s.ToM-s.M))+1 {
+	// The path ends 20 m before the due stop C, where the map waits for it (#145).
+	if len(mo.PathStops) != 0 {
 		t.Fatalf("path stops %v (to %v)", mo.PathStops, s.ToM-s.M)
+	}
+	r := m.Routes["10"]
+	if q := pointAt(r.Shape, r.Cum, s.ToM-20); len(mo.Path) > 0 && dist(mo.Path[len(mo.Path)-1], LL{q[0], q[1]}) > 1 {
+		t.Fatalf("path ends at %v, want 20 m before C %v", mo.Path[len(mo.Path)-1], q)
 	}
 	if mo.PathBeyond != nil {
 		t.Fatalf("path beyond %v", mo.PathBeyond)
@@ -735,17 +745,17 @@ func TestLiveCityPlacedNeverGoesBack(t *testing.T) {
 		return Board{Stop: "D", At: at, Rows: []LiveRow{row("10", "35.3", lon, 2, "v")}}
 	}
 	l.add(b("25.11", 1000))
-	first := l.placed(1060, "")[0] // moved on at 15 m/s: ~900 m ahead of the sighting
-	l.add(b("25.118", 1070))       // ~170 m behind the shown point
-	held := l.placed(1070, "")[0]
+	first := l.placed(1120, "")[0] // 15 s at B, then on at 7.5 m/s: ~1695 m
+	l.add(b("25.118", 1125))       // ~1634 m: behind the shown point
+	held := l.placed(1125, "")[0]
 	if held.M < first.M {
 		t.Fatalf("went back from %.0f to %.0f", first.M, held.M)
 	}
 	if q := pointAt(r.Shape, r.Cum, held.M); held.Lat != q[0] || held.Lon != q[1] {
 		t.Fatalf("held point %v,%v is not the shape at %.0f", held.Lat, held.Lon, held.M)
 	}
-	l.add(b("25.10", 1080)) // far behind: a real reset
-	if p := l.placed(1080, "")[0]; p.M > 100 {
+	l.add(b("25.10", 1130)) // far behind: a real reset
+	if p := l.placed(1130, "")[0]; p.M > 100 {
 		t.Fatalf("a sighting > 300 m behind is taken as it is: %.0f", p.M)
 	}
 }
@@ -783,20 +793,59 @@ func TestLiveCityStandingOverShortSightings(t *testing.T) {
 	}
 }
 
-// A standing bus that an estimate had moved on is shown back at its point, not held ahead (#139, review).
-func TestLiveCityStandingBusIsNotHeldAhead(t *testing.T) {
+// A standing bus that an estimate had moved on stays where the map showed it: it never goes back (#145).
+func TestLiveCityStandingBusIsHeldNotPulledBack(t *testing.T) {
 	m := buildModel(lineRaw())
 	l := newLiveCity(m)
 	at := func(ts int64) {
-		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", "25.11", 2, "v")}})
+		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m
 	}
 	at(1000)
-	l.placed(1015, "") // moved on ~225 m
+	first := l.placed(1015, "")[0] // moved on ~225 m
 	at(1010)
 	l.placed(1019, "")
 	at(1020)
-	if p := l.placed(1020, ""); p[0].M != l.Buses["v"].M {
-		t.Fatalf("standing bus held ahead at %.0f, its point is %.0f", p[0].M, l.Buses["v"].M)
+	if l.Buses["v"].Speed != nil {
+		t.Fatal("20 s at one point is standing")
+	}
+	p := l.placed(1020, "")[0]
+	if p.M < first.M {
+		t.Fatalf("standing bus went back from %.0f to %.0f", first.M, p.M)
+	}
+	if p.EstM != l.Buses["v"].M {
+		t.Fatalf("stop ETAs count from the standing point %.0f, not %.0f", l.Buses["v"].M, p.EstM)
+	}
+}
+
+// The map never runs a bus past the next stop ahead of its sighting: a board of that stop would
+// pull it back. ETAs still use the estimate without the cap (#145).
+func TestLiveCityMapWaitsBeforeTheNextStop(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m, B at ~908 m
+	p := l.placed(1040, "")[0]                                                              // 15 m/s: ~1054 m
+	if math.Abs(p.M-(908-20)) > 1 {
+		t.Fatalf("shown at %.0f, want 20 m before B (~908 m), which no board has seen it pass", p.M)
+	}
+	if p.EstM < 1000 {
+		t.Fatalf("ETAs use the estimate without the cap: %.0f", p.EstM)
+	}
+	// B is reached at ~29 s; after 15 s there it goes on at half speed: ~888 + 7.5*16 at 60 s.
+	if p := l.placed(1060, "")[0]; p.M < 908 || p.M > 888+7.5*17 {
+		t.Fatalf("after 15 s at B the bus goes on slowly: %.0f", p.M)
+	}
+}
+
+// A board of the nearer stop still lists the bus: the map does not pull it back (#145).
+func TestLiveCityNearerBoardDoesNotPullBack(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m
+	first := l.placed(1035, "")[0]
+	l.add(Board{Stop: "B", At: 1040, Rows: []LiveRow{row("10", "35.3", "25.1085", 1, "v")}}) // ~771 m, due at B
+	p := l.placed(1040, "")[0]
+	if p.M < first.M {
+		t.Fatalf("went back from %.0f to %.0f", first.M, p.M)
 	}
 }
 
@@ -833,13 +882,118 @@ func TestEstimatesIgnoreTheHold(t *testing.T) {
 	m := buildModel(lineRaw())
 	l := newLiveCity(m)
 	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}})  // ~454 m
-	l.placed(1035, "")                                                                       // moved on at 15 m/s to ~979 m, past B (~908 m)
+	l.placed(1035, "")                                                                       // moved on at 15 m/s; the map waits 20 m before B (~908 m)
 	l.add(Board{Stop: "D", At: 1040, Rows: []LiveRow{row("10", "35.3", "25.1085", 2, "v")}}) // ~771 m, before B
 	p := l.placed(1040, "")[0]
-	if p.M < 970 {
+	if p.M < 880 {
 		t.Fatalf("the map holds the bus: %.0f", p.M)
 	}
 	if a := estimates("B", []Placed{p}, 1040); len(a) != 1 {
 		t.Fatalf("stop B is still ahead of the bus: %+v", a)
+	}
+}
+
+// The path the client drives ends where the map waits, 20 m before the next stop: a client that
+// drove on to the board's stop would be pulled back at the next update (#145).
+func TestMotionEndsWhereTheMapWaits(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m, B at ~908 m
+	p := l.placed(1000, "")[0]
+	r := m.Routes["10"]
+	mo := motion(&p)
+	if len(mo.Path) < 2 || mo.PathBeyond != nil {
+		t.Fatalf("a path up to B and nothing beyond it: %+v", mo)
+	}
+	last := mo.Path[len(mo.Path)-1]
+	if q := pointAt(r.Shape, r.Cum, r.StopM[1]-20); dist(last, LL{q[0], q[1]}) > 1 {
+		t.Fatalf("path ends at %v, want 20 m before B %v", last, q)
+	}
+	if mo.Speed == nil {
+		t.Fatal("the path keeps the board speed")
+	}
+	if w := l.placed(1040, "")[0]; motion(&w).Path != nil {
+		t.Fatalf("waiting before B: no path on: %+v", motion(&w))
+	}
+}
+
+// A bus seen 10 m before B has not passed it: the map waits there, so the board of B, which still
+// lists it, does not pull it back (#145, review).
+func TestLiveCityBusJustBeforeAStopWaitsThere(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.10989", 2, "v")}}) // ~898 m, B at ~908 m
+	first := l.placed(1012, "")[0]                                                            // waiting at B: < 15 s
+	if first.M > 908 {
+		t.Fatalf("shown at %.0f, past B which no board has seen it pass", first.M)
+	}
+	l.add(Board{Stop: "B", At: 1014, Rows: []LiveRow{row("10", "35.3", "25.10989", 1, "v")}}) // still due at B
+	if p := l.placed(1014, "")[0]; p.M < first.M {
+		t.Fatalf("went back from %.0f to %.0f", first.M, p.M)
+	}
+}
+
+// The client drives the dot on from the last point shown; a new board with the same GPS point
+// (the bus not yet standing) must not put it back behind where the client got to (#145, review 2).
+func TestLiveCityHoldMovesOnWithTheClient(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	b := func(at int64) Board {
+		return Board{Stop: "D", At: at, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}} // ~454 m, B at ~908 m
+	}
+	l.add(b(1000))
+	first := l.placed(1000, "")[0]
+	l.add(b(1010)) // same point 10 s later: not standing yet
+	if l.Buses["v"].Speed == nil {
+		t.Fatal("10 s at one point is not standing yet")
+	}
+	p := l.placed(1010, "")[0]
+	if v := *l.Buses["v"].Speed; p.M < first.M+0.8*v*10 {
+		t.Fatalf("shown at %.0f; the client drove on from %.0f at %.1f m/s for 10 s", p.M, first.M, v)
+	}
+	if p.M > 908-20+1 {
+		t.Fatalf("shown at %.0f, past B", p.M)
+	}
+}
+
+// The map waits at a stop for at most 15 s, then goes on at half speed to the next stop, where it
+// waits again; never past the board's stop (#145: no 30-90 s freeze).
+func TestMapAtWaitsAtMost15sPerStop(t *testing.T) {
+	m := buildModel(lineRaw())
+	r := m.Routes["10"]
+	s := sightings(m, Board{Stop: "E", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 3, "v")}})[0] // ~454 m, due at E
+	v := *s.Speed
+	toB := (r.StopM[1] - 20 - s.M) / v
+	for _, c := range []struct {
+		age       float64
+		want, end float64
+	}{
+		{toB / 2, s.M + v*toB/2, r.StopM[1] - 20},
+		{toB + 10, r.StopM[1] - 20, r.StopM[1] - 20},
+		{toB + 15 + 20, r.StopM[1] - 20 + v/2*20, r.StopM[2] - 20},
+		{1e4, r.StopM[4], r.StopM[4]},
+	} {
+		got, end := mapAt(r, s, c.age)
+		if math.Abs(got-c.want) > 1 || math.Abs(end-c.end) > 1 {
+			t.Fatalf("age %.0f: at %.0f waiting at %.0f, want %.0f and %.0f", c.age, got, end, c.want, c.end)
+		}
+	}
+}
+
+// placed runs on every request: with no new board the map follows mapAt and never goes back; the
+// hold does not move on again at each call (#145, review 3).
+func TestLiveCityRepeatedPlacedFollowsMapAt(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m
+	s, r := l.Buses["v"], m.Routes["10"]
+	prev := -1.0
+	for now := int64(1040); now <= 1110; now += 2 {
+		p := l.placed(now, "")[0]
+		want, _ := mapAt(r, s, float64(now-1000))
+		if p.M < prev || math.Abs(p.M-want) > 1 {
+			t.Fatalf("at %d: shown %.0f (before %.0f), want %.0f", now, p.M, prev, want)
+		}
+		prev = p.M
 	}
 }
