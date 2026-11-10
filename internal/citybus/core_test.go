@@ -671,3 +671,35 @@ func TestEstimatesDefaultSpeed(t *testing.T) {
 		t.Fatalf("C, 908 m after B at 6 m/s: %+v", a)
 	}
 }
+
+// Before the due stop, the trip that fits is the one nearest the bus at the due stop (where its time
+// is known), not at the asked stop: rides differ from trip to trip (codex).
+func TestEstimatesCountBackOnTheTripNearestAtTheDueStop(t *testing.T) {
+	m := buildModel(lineRaw())
+	c := athensClock(time.Now().Unix())
+	now := c.Midnight + 36000 // 10:00, today
+	hm := func(h, m int) int { return h*3600 + m*60 }
+	m.Routes["10"].Trips = []Trip{
+		{ID: "slow", Day: c.Day, Times: []int{hm(10, 15), hm(10, 17), hm(10, 19), hm(10, 30), NoTime}}, // at C 1 min off the bus's time at D
+		{ID: "fits", Day: c.Day, Times: []int{hm(10, 10), hm(10, 12), hm(10, 14), hm(10, 20), NoTime}}, // at D when the bus is
+	}
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: now, Rows: []LiveRow{row("10", "35.3", "25.105", 20, "v1")}})
+	a := estimated(stopArrivals(m, "C", nil, l.placed(now, ""), now))
+	if len(a) != 1 || a[0].At-now != 20*60-6*60 {
+		t.Fatalf("C: want 6 min before D (the 10:20 trip): %+v", a)
+	}
+}
+
+// With no timetable too, a stop before the due stop is never sooner than the bus can drive there
+// (15 m/s): C in 1 min is 1771 m ahead, B is 863 m ahead (codex).
+func TestEstimatesByDistanceNeverFasterThanTheCap(t *testing.T) {
+	m := buildModel(loopRaw())
+	now := int64(1_000_000)
+	l := newLiveCity(m)
+	l.add(Board{Stop: "C", At: now, Rows: []LiveRow{{LineCode: "L", RouteCode: "90", Latitude: 35.3, Longitude: 25.1005, DepartureMins: 1, VehicleCode: "v"}}})
+	a := stopArrivals(m, "B", nil, l.placed(now, ""), now)
+	if len(a) == 0 || !a[0].Estimate || !near(a[0].At-now, 58) {
+		t.Fatalf("B: want 863 m at 15 m/s, not its share of the minute (29 s): %+v", a)
+	}
+}

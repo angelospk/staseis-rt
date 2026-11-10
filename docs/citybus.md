@@ -28,8 +28,8 @@ cities; `/` and `/{city}/debug` show the rotation state.
   (citybus.gr's own minutes) plus or minus the timetable's ride to the asked stop, or distance over
   speed where the timetable has no times; up to 60 min ahead. `"refreshing": true` says a read of
   the stop's own board is in flight: the client asks again in about 2 s, and the board then wins.
-  Measured on Kavala (2026-11-10, 165 bus-stop pairs against citybus.gr's own boards): median
-  error 23 s, 90 % within 53 s.
+  Measured on Kavala (2026-11-10, 381 bus-stop pairs against citybus.gr's own boards): median
+  error 22 s, 90 % within 52 s, the worst 95 s.
 - `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
   the city's current data (a sha256 of it, saved in `static.json`). A daily reload of the same data
   keeps it, so the bot's alerts and the web's stop index (`trips-<city>.json`) stay valid.

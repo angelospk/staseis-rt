@@ -245,17 +245,18 @@ const (
 )
 
 // rideSecs is the timetable's seconds from stop index a to stop index b (a <= b) of the route, on
-// the trip whose time at a is nearest to at (the trip that fits the bus best). ok is false when no
-// trip of these days has both times, or when the times cannot be a ride over dist metres (they
-// run backwards, or are faster than 20 m/s with a minute to spare: the timetable is in minutes).
-func rideSecs(r *Route, a, b int, at int64, days [3]serviceDay, dist float64) (int64, bool) {
+// the trip whose time at stop index ref (a or b: where the bus's time is known) is nearest to at:
+// the trip that fits the bus best. ok is false when no trip of these days has both times, or when
+// the times cannot be a ride over dist metres (they run backwards, or are faster than 20 m/s with
+// a minute to spare: the timetable is in minutes).
+func rideSecs(r *Route, a, b, ref int, at int64, days [3]serviceDay, dist float64) (int64, bool) {
 	best, ride := int64(math.MaxInt64), int64(-1)
 	for _, d := range days {
 		for _, t := range r.Trips {
 			if t.Day != d.day || t.Times[a] == NoTime || t.Times[b] == NoTime {
 				continue
 			}
-			off := d.base + int64(t.Times[a]) - at
+			off := d.base + int64(t.Times[ref]) - at
 			if off < 0 {
 				off = -off
 			}
@@ -292,7 +293,7 @@ func estimateAt(p *Placed, k int, now int64, days [3]serviceDay) int64 {
 		}
 		ride := int64(math.Round((x - s.ToM) / v))
 		if a >= 0 && k >= a {
-			if t, ok := rideSecs(r, a, k, s.ETA, days, x-s.ToM); ok {
+			if t, ok := rideSecs(r, a, k, a, s.ETA, days, x-s.ToM); ok {
 				ride = t
 			}
 		}
@@ -300,12 +301,13 @@ func estimateAt(p *Placed, k int, now int64, days [3]serviceDay) int64 {
 	}
 	due := max(now, s.ETA) // the bus is not at the anchor yet
 	soonest := now + int64(math.Round((x-p.M)/maxSpeed))
+	at := now + int64(math.Round(float64(due-now)*(x-p.M)/(s.ToM-p.M)))
 	if a >= 0 && k <= a {
-		if t, ok := rideSecs(r, k, a, s.ETA, days, s.ToM-x); ok {
-			return min(due, max(soonest, s.ETA-t))
+		if t, ok := rideSecs(r, k, a, a, s.ETA, days, s.ToM-x); ok {
+			at = s.ETA - t
 		}
 	}
-	return now + int64(math.Round(float64(due-now)*(x-p.M)/(s.ToM-p.M)))
+	return min(due, max(soonest, at))
 }
 
 // estimates lists the placed buses due at a stop: every visit of the stop that is ahead of a bus
