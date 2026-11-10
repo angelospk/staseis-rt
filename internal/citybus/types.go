@@ -218,6 +218,7 @@ type Placed struct {
 	Lon     float64
 	M       float64 // shown metre: held, never behind the last one shown
 	EstM    float64 // metre without the hold: stop ETAs use it
+	WaitM   float64 // the metre the map drives the bus to or waits at (#145)
 	At      int64   // the sighting time for "gps", the asked time for "estimate"
 	Kind    string  // "gps" or "estimate"
 	Bearing *float64

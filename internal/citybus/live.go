@@ -92,16 +92,13 @@ func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 	if age > MaxAge {
 		return nil
 	}
-	moved := s.M
+	est := s.M
 	if s.Speed != nil && age > 0 {
-		moved = math.Min(s.ToM, s.M+*s.Speed*float64(age))
+		est = math.Min(s.ToM, s.M+*s.Speed*float64(age))
 	}
-	est := moved
-	// The map never runs past the next stop ahead of the sighting: no board has seen the bus pass
-	// it, and the next board of that stop would pull it back (#145). ETAs keep est.
-	if c := nextStopCap(route, s.M); moved > c {
-		moved = c
-	}
+	// The map waits before each stop no board has seen the bus pass, at most stopWait (#145).
+	// ETAs keep est.
+	moved, wait := mapAt(route, s, float64(age))
 	if floor > moved && floor-moved <= backHold {
 		moved = floor
 	}
@@ -132,7 +129,52 @@ func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 	if kind == "gps" {
 		at = s.Seen
 	}
-	return &Placed{S: s, Route: route, Lat: lat, Lon: lon, M: m, EstM: est, At: at, Kind: kind, Bearing: brg, NextIdx: nextIdx}
+	return &Placed{S: s, Route: route, Lat: lat, Lon: lon, M: m, EstM: est, WaitM: wait, At: at, Kind: kind, Bearing: brg, NextIdx: nextIdx}
+}
+
+// stopWait is how long the map waits before a stop no board has seen the bus pass (s): about a
+// stop's dwell. After it, the bus goes on at half its speed, so a board that still lists it at
+// that stop pulls it back only a little.
+const stopWait = 15
+
+// mapAt is where the map shows a bus seen at s, age seconds later, and the point it drives to or
+// waits at: on at its board speed to 20 m before the first stop it has not passed, stopWait there,
+// then on at half speed to the next stop, and so on; never past the board's stop. A bus with no
+// speed stays at its sighting.
+func mapAt(r *Route, s Sighting, age float64) (m, wait float64) {
+	end := math.Min(r.Cum[len(r.Cum)-1], s.ToM)
+	m = s.M
+	k := 0
+	for k < len(r.StopM) && r.StopM[k] < m-30 {
+		k++
+	}
+	next := func() float64 {
+		if k >= len(r.StopM) {
+			return end
+		}
+		return math.Min(end, math.Max(m, r.StopM[k]-20))
+	}
+	wait = next()
+	if s.Speed == nil || age <= 0 {
+		return m, wait
+	}
+	v, t := *s.Speed, age
+	for {
+		if d := wait - m; t*v < d {
+			return m + t*v, wait
+		} else {
+			m, t = wait, t-d/v
+		}
+		if m >= end || t <= stopWait {
+			return m, wait
+		}
+		t -= stopWait
+		if v == *s.Speed {
+			v /= 2
+		}
+		k++
+		wait = next()
+	}
 }
 
 // nextStopCap is how far the map may move a bus seen at m: 20 m before the first stop it has not
@@ -152,7 +194,7 @@ func motion(p *Placed) Motion {
 	r := p.Route
 	end := math.Min(r.Cum[len(r.Cum)-1], p.S.ToM) // never past the stop the bus was due at
 	// nor past where the map waits for it (#145): a client driving on would be pulled back.
-	end = math.Min(end, nextStopCap(r, p.S.M))
+	end = math.Min(end, p.WaitM)
 	if end-p.M < 5 {
 		return Motion{}
 	}
@@ -264,7 +306,7 @@ func (l *liveCity) placed(now int64, line string) []Placed {
 			// The client drove the dot on from there at the bus's speed: so does the hold, up to
 			// where the map waits, or a new board with the same GPS point would put it back.
 			if r := l.model.Routes[s.Route]; r != nil && s.Speed != nil && now > last.at {
-				floor = math.Max(last.m, math.Min(last.m+*s.Speed*float64(now-last.at), nextStopCap(r, s.M)))
+				floor = math.Max(last.m, math.Min(last.m+*s.Speed*float64(now-last.at), nextStopCap(r, last.m)))
 			}
 			floor = math.Min(floor, s.ToM-20)
 		}
