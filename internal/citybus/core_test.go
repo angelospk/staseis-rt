@@ -186,8 +186,12 @@ func TestSightingsPlaceAndMaxAge(t *testing.T) {
 		t.Fatalf("placed now %+v", now)
 	}
 	later := place(m, s[0], 1120)
-	if later.Kind != "estimate" || later.M <= s[0].ToM-30 || later.M > s[0].ToM {
-		t.Fatalf("later %v (to %v)", later.M, s[0].ToM)
+	// The estimate reaches the board's stop D; the map waits 20 m before C, the next stop (#145).
+	if later.Kind != "estimate" || later.EstM <= s[0].ToM-30 || later.EstM > s[0].ToM {
+		t.Fatalf("later est %v (to %v)", later.EstM, s[0].ToM)
+	}
+	if c := m.Routes["10"].StopM[2]; later.M != c-20 {
+		t.Fatalf("later shown at %v, want 20 m before C at %v", later.M, c)
 	}
 	if later.At != 1120 || now.At != 1000 {
 		t.Fatalf("at: gps keeps the sighting time, estimate is now: %d %d", now.At, later.At)
@@ -813,7 +817,7 @@ func TestLiveCityMapWaitsBeforeTheNextStop(t *testing.T) {
 	m := buildModel(lineRaw())
 	l := newLiveCity(m)
 	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m, B at ~908 m
-	p := l.placed(1060, "")[0]                                                               // 15 m/s: ~1354 m
+	p := l.placed(1060, "")[0]                                                              // 15 m/s: ~1354 m
 	if p.M > 908-20+1 {
 		t.Fatalf("shown at %.0f, past B (~908 m) which no board has seen it pass", p.M)
 	}
@@ -876,5 +880,29 @@ func TestEstimatesIgnoreTheHold(t *testing.T) {
 	}
 	if a := estimates("B", []Placed{p}, 1040); len(a) != 1 {
 		t.Fatalf("stop B is still ahead of the bus: %+v", a)
+	}
+}
+
+// The path the client drives ends where the map waits, 20 m before the next stop: a client that
+// drove on to the board's stop would be pulled back at the next update (#145).
+func TestMotionEndsWhereTheMapWaits(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m, B at ~908 m
+	p := l.placed(1000, "")[0]
+	r := m.Routes["10"]
+	mo := motion(&p)
+	if len(mo.Path) < 2 || mo.PathBeyond != nil {
+		t.Fatalf("a path up to B and nothing beyond it: %+v", mo)
+	}
+	last := mo.Path[len(mo.Path)-1]
+	if q := pointAt(r.Shape, r.Cum, r.StopM[1]-20); dist(last, LL{q[0], q[1]}) > 1 {
+		t.Fatalf("path ends at %v, want 20 m before B %v", last, q)
+	}
+	if mo.Speed == nil {
+		t.Fatal("the path keeps the board speed")
+	}
+	if w := l.placed(1060, "")[0]; motion(&w).Path != nil {
+		t.Fatalf("waiting before B: no path on: %+v", motion(&w))
 	}
 }
