@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -580,6 +581,34 @@ func TestHistoryOneRowPerMoveOrMinute(t *testing.T) {
 		if !want[g] {
 			t.Fatalf("row %q not expected; rows:\n%s", g, strings.Join(got, "\n"))
 		}
+	}
+}
+
+// Two boards read in one second show a bus at two places: the writer keeps one row per vehicle per
+// second, so the second place is written with the next sighting, not held back for a minute.
+func TestHistorySecondPlaceInOneSecondIsWrittenNext(t *testing.T) {
+	hdir := filepath.Join(t.TempDir(), "history")
+	start := time.Now().Unix()
+	w, err := history.Open(hdir, 1<<20, time.Hour, func() time.Time { return time.Unix(start, 0) }, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _, today, _, clock := runCity(t, t.TempDir(), w)
+	run := codeOf(today, "10", t1720)
+	t0 := *clock
+	boardWith(t, c, [2]string{run, "25.115"}) // a row
+	boardWith(t, c, [2]string{run, "25.116"}) // moved, same second: no row
+	*clock++
+	boardWith(t, c, [2]string{run, "25.116"}) // the new place, a second later: a row
+	w.Close()
+	var got []string
+	for _, r := range historyRows(t, hdir) {
+		got = append(got, r[0]+" "+r[5])
+	}
+	sort.Strings(got)
+	want := []string{fmt.Sprintf("%d 25115000", t0), fmt.Sprintf("%d 25116000", t0+1)}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rows (fix_t lon) = %v, want %v", got, want)
 	}
 }
 

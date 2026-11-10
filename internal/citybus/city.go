@@ -410,16 +410,17 @@ func (c *City) board(ctx context.Context, stop string, pri Priority) (Board, err
 }
 
 // writeFixLocked queues a sighting as a history row, unless the last row of that bus has the same
-// place and is under a minute old. Add never blocks.
+// place and is under a minute old, or is of the same second (the writer keeps one row per vehicle
+// per second: a place it would drop must not count as written). Add never blocks.
 func (c *City) writeFixLocked(s Sighting) {
-	if c.hist == nil {
+	route := c.model.Routes[s.Route]
+	if c.hist == nil || route == nil {
 		return
 	}
-	if last, ok := c.histLast[s.ID]; ok && last.Lat == s.Lat && last.Lon == s.Lon && s.Seen-last.At < 60 {
+	if last, ok := c.histLast[s.ID]; ok && (s.Seen <= last.At || last.Lat == s.Lat && last.Lon == s.Lon && s.Seen-last.At < 60) {
 		return
 	}
 	c.histLast[s.ID] = histFix{Lat: s.Lat, Lon: s.Lon, At: s.Seen}
-	route := c.model.Routes[s.Route] // never nil: sightings keeps only rows of a known route
 	trip := ""
 	if t, _, _ := c.runOfRoute(route, s.ID); t != nil {
 		trip = t.ID
