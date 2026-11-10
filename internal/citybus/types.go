@@ -206,6 +206,8 @@ type Sighting struct {
 	ToM    float64 // its metre
 	ETA    int64   // unix s due there
 	Speed  *float64
+	Since  int64   // unix s the bus was first seen at this point (within standStill); 0 is Seen
+	SinceM float64 // the metre of that first sighting: standing is measured from it
 }
 
 // Placed is where a bus is at a given time.
@@ -214,9 +216,10 @@ type Placed struct {
 	Route   *Route
 	Lat     float64
 	Lon     float64
-	M       float64
-	At      int64  // the sighting time for "gps", the asked time for "estimate"
-	Kind    string // "gps" or "estimate"
+	M       float64 // shown metre: held, never behind the last one shown
+	EstM    float64 // metre without the hold: stop ETAs use it
+	At      int64   // the sighting time for "gps", the asked time for "estimate"
+	Kind    string  // "gps" or "estimate"
 	Bearing *float64
 	NextIdx int
 }
