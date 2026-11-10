@@ -979,3 +979,21 @@ func TestMapAtWaitsAtMost15sPerStop(t *testing.T) {
 		}
 	}
 }
+
+// placed runs on every request: with no new board the map follows mapAt and never goes back; the
+// hold does not move on again at each call (#145, review 3).
+func TestLiveCityRepeatedPlacedFollowsMapAt(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m
+	s, r := l.Buses["v"], m.Routes["10"]
+	prev := -1.0
+	for now := int64(1040); now <= 1110; now += 2 {
+		p := l.placed(now, "")[0]
+		want, _ := mapAt(r, s, float64(now-1000))
+		if p.M < prev || math.Abs(p.M-want) > 1 {
+			t.Fatalf("at %d: shown %.0f (before %.0f), want %.0f", now, p.M, prev, want)
+		}
+		prev = p.M
+	}
+}
