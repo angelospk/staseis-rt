@@ -237,6 +237,7 @@ type shownAt struct {
 	route string
 	m     float64
 	at    int64 // unix s it was shown
+	seen  int64 // the Seen of the sighting it was shown from
 }
 
 func newLiveCity(m *Model) *liveCity {
@@ -304,8 +305,9 @@ func (l *liveCity) placed(now int64, line string) []Placed {
 		if last, ok := l.shown[id]; ok && last.route == s.Route {
 			floor = last.m
 			// The client drove the dot on from there at the bus's speed: so does the hold, up to
-			// where the map waits, or a new board with the same GPS point would put it back.
-			if r := l.model.Routes[s.Route]; r != nil && s.Speed != nil && now > last.at {
+			// where the map waits, or a new board with the same GPS point would put it back. Only
+			// for a new sighting: with the same one, mapAt already moves the bus on (#145).
+			if r := l.model.Routes[s.Route]; r != nil && s.Speed != nil && s.Seen != last.seen && now > last.at {
 				floor = math.Max(last.m, math.Min(last.m+*s.Speed*float64(now-last.at), nextStopCap(r, last.m)))
 			}
 			floor = math.Min(floor, s.ToM-20)
@@ -314,7 +316,7 @@ func (l *liveCity) placed(now int64, line string) []Placed {
 		if p == nil {
 			continue
 		}
-		l.shown[id] = shownAt{route: s.Route, m: p.M, at: now}
+		l.shown[id] = shownAt{route: s.Route, m: p.M, at: now, seen: s.Seen}
 		if line == "" || p.Route.Line == line {
 			out = append(out, *p)
 		}
