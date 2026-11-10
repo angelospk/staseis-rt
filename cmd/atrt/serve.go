@@ -43,8 +43,16 @@ func serve(args []string) error {
 	cities := fs.String("cities", "all", "citybus only: \"all\" or codes/names separated by commas (agq,her,...)")
 	fs.Parse(args)
 
+	var histBytes int64
+	if *hist {
+		if *histMB <= 0 || *histDays <= 0 {
+			return fmt.Errorf("--history-max-mb and --history-days must be positive")
+		}
+		histBytes = *histMB << 20
+	}
+	histKeep := time.Duration(*histDays) * 24 * time.Hour
 	if *cityID == "citybus" {
-		return serveCitybus(*listen, *state, *cities)
+		return serveCitybus(*listen, *state, *cities, histBytes, histKeep)
 	}
 
 	city, err := server.CityByID(*cityID)
@@ -76,18 +84,11 @@ func serve(args []string) error {
 		return fmt.Errorf("--oseth-rps %.1f is outside 0..%d", *osethRPS, oseth.MaxRPS)
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	var histBytes int64
-	if *hist {
-		if *histMB <= 0 || *histDays <= 0 {
-			return fmt.Errorf("--history-max-mb and --history-days must be positive")
-		}
-		histBytes = *histMB << 20
-	}
 	server.UseCityGlobals(city)
 	app := server.New(server.Config{Listen: *listen, MetricsListen: *metricsListen, StateDir: *state, RPS: *rps, Matcher: kind,
 		ReleaseURL: *releaseURL, GTFSZip: *gtfsZip, GTFSCKANURL: *gtfsCKAN, TelematicsURL: *telURL, OSETHRPS: *osethRPS, City: city.ID, OASTHSalt: salt, Proxy: *proxy, ReleaseCheck: *check, HistoryMaxBytes: histBytes,
 		STASYURL: *stasyURL, SuburbanURL: *suburbanURL, MPassURL: *mpassURL,
-		Sched: sched.DefaultConfig(), HistoryKeep: time.Duration(*histDays) * 24 * time.Hour}, log)
+		Sched: sched.DefaultConfig(), HistoryKeep: histKeep}, log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	err = app.Run(ctx)
@@ -98,13 +99,13 @@ func serve(args []string) error {
 }
 
 // serveCitybus runs every citybus.gr city given in one process: /{city}/v1/..., /{city}/v2/...
-func serveCitybus(listen, state, cities string) error {
+func serveCitybus(listen, state, cities string, histBytes int64, histKeep time.Duration) error {
 	ids, err := citybus.ParseCities(cities)
 	if err != nil {
 		return fmt.Errorf("bad --cities: %w", err)
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	svc, err := citybus.New(citybus.Config{StateDir: state, Cities: ids}, log)
+	svc, err := citybus.New(citybus.Config{StateDir: state, Cities: ids, HistoryMaxBytes: histBytes, HistoryKeep: histKeep}, log)
 	if err != nil {
 		return err
 	}

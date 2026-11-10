@@ -9,17 +9,24 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/angelospk/athens-transit-rt/internal/history"
 )
 
 // Config is the citybus kind of `atrt serve --city citybus`.
 type Config struct {
 	StateDir string
 	Cities   []string // ids of Cities, in any order; served in the order of Cities
+	// Fix history (off when HistoryMaxBytes is 0): one writer for every city, in
+	// <state>/history (rt#142).
+	HistoryMaxBytes int64
+	HistoryKeep     time.Duration
 }
 
 // ParseCities reads --cities: "all", or codes or slugs separated by commas. The output is always
@@ -71,12 +78,20 @@ type Service struct {
 	cities map[string]*City
 	order  []*City
 	log    *slog.Logger
+	hist   *history.Writer // the one fix history of every city; nil = off
 }
 
 // New builds the cities; Run starts their rotations.
 func New(cfg Config, log *slog.Logger) (*Service, error) {
 	hc := &http.Client{Timeout: 20 * time.Second}
 	s := &Service{cities: map[string]*City{}, log: log}
+	if cfg.HistoryMaxBytes > 0 {
+		h, err := history.Open(filepath.Join(cfg.StateDir, "history"), cfg.HistoryMaxBytes, cfg.HistoryKeep, time.Now, log)
+		if err != nil {
+			return nil, err
+		}
+		s.hist = h
+	}
 	for _, conf := range Cities {
 		on := false
 		for _, id := range cfg.Cities {
@@ -87,12 +102,26 @@ func New(cfg Config, log *slog.Logger) (*Service, error) {
 		}
 		c, err := newCity(conf, newClient(conf.Sub, hc), cfg.StateDir, log)
 		if err != nil {
+			if s.hist != nil {
+				s.hist.Close()
+			}
 			return nil, err
 		}
+		c.hist = s.hist
 		s.cities[conf.ID] = c
 		s.order = append(s.order, c)
 	}
 	return s, nil
+}
+
+// close saves every city's run log and ends the fix history. Safe to call twice.
+func (s *Service) close() {
+	for _, c := range s.order {
+		c.flush()
+	}
+	if s.hist != nil {
+		s.hist.Close()
+	}
 }
 
 // Run serves HTTP on listen and rotates every city until ctx ends.
@@ -120,6 +149,7 @@ func (s *Service) Run(ctx context.Context, listen string) error {
 	s.log.Info("citybus serving", "listen", listen, "cities", strings.Join(ids, ","))
 	err = srv.Serve(ln)
 	wg.Wait()
+	s.close() // after the rotations: no board writes to a closed history
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -262,7 +292,8 @@ func (c *City) route(w http.ResponseWriter, path string) {
 	case path == "/v2/alerts":
 		writeJSON(w, obj{"alerts": []any{}, "updated_at": c.unix()}, http.StatusOK, 300)
 	case match(reV1Schedule):
-		ok(w, c.schedule(dec(m[1])), "unknown_line", 300)
+		body, maxAge := c.schedule(dec(m[1]))
+		ok(w, body, "unknown_line", maxAge)
 	case match(reV1Line):
 		ok(w, c.v1Line(dec(m[1])), "unknown_line", 5)
 	case match(reV1Stop):

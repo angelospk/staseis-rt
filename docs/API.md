@@ -323,6 +323,10 @@ default. `?date=YYYY-MM-DD` reads another day, up to 7 days ahead.
     15 min), from 3 min before to 20 min after the run's time; each start counts for one run.
     `false` when no bus left in that window and 20 min have passed. Missing when not known yet,
     or when the run was due before the server started watching (after a restart).
+  - `citybus` (the citybus.gr cities, [citybus.md](citybus.md)): `true` when a bus that carries the
+    run's code was seen past its first stop. Never `false`: only some buses show, so a run with no
+    bus seen has no `seen` key. `live: true` (this source only) while that bus was sighted in the
+    last 120 s.
 - `expired` is `true` when the day is outside the static GTFS validity. The trips are then those
   of the same weekday inside the feed, so the timetable may not be the one OASA runs.
 - `404 {"error":"unknown_line"}` for a line the feed does not have, `400 {"error":"bad_date"}`

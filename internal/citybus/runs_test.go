@@ -541,13 +541,12 @@ func historyRows(t *testing.T, dir string) [][]string {
 func TestHistoryOneRowPerMoveOrMinute(t *testing.T) {
 	hdir := filepath.Join(t.TempDir(), "history")
 	start := time.Now().Unix()
-	clock := &start // runCity's clock, once the city exists
-	w, err := history.Open(hdir, 1<<20, time.Hour, func() time.Time { return time.Unix(*clock, 0) }, quiet)
+	// The writer's clock only names the hour file; it stays still, so the writer goroutine shares nothing with the test.
+	w, err := history.Open(hdir, 1<<20, time.Hour, func() time.Time { return time.Unix(start, 0) }, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, _, today, _, cl := runCity(t, t.TempDir(), w)
-	clock = cl
+	c, _, today, _, clock := runCity(t, t.TempDir(), w)
 	run, dev := codeOf(today, "10", t1720), "1607413212998552622"
 	t0 := *clock
 	boardWith(t, c, [2]string{run, "25.115"}, [2]string{dev, "25.128"}) // row, row
@@ -588,13 +587,12 @@ func TestHistoryOneRowPerMoveOrMinute(t *testing.T) {
 func TestHistoryTwoCitiesSameCodeSameSecond(t *testing.T) {
 	hdir := filepath.Join(t.TempDir(), "history")
 	start := time.Now().Unix()
-	clock := &start // runCity's clock, once the city exists
-	w, err := history.Open(hdir, 1<<20, time.Hour, func() time.Time { return time.Unix(*clock, 0) }, quiet)
+	// The writer's clock only names the hour file; it stays still, so the writer goroutine shares nothing with the test.
+	w, err := history.Open(hdir, 1<<20, time.Hour, func() time.Time { return time.Unix(start, 0) }, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, _, today, _, cl := runCity(t, t.TempDir(), w)
-	clock = cl
+	a, _, today, _, _ := runCity(t, t.TempDir(), w)
 	b, _, _, _, _ := runCity(t, t.TempDir(), w)
 	b.Conf.ID = "u"
 	b.now = a.now
@@ -651,13 +649,12 @@ func TestServiceStopSavesRunsAndHistory(t *testing.T) {
 	dir := t.TempDir()
 	hdir := filepath.Join(dir, "history")
 	start := time.Now().Unix()
-	clock := &start // runCity's clock, once the city exists
-	w, err := history.Open(hdir, 1<<20, time.Hour, func() time.Time { return time.Unix(*clock, 0) }, quiet)
+	// The writer's clock only names the hour file; it stays still, so the writer goroutine shares nothing with the test.
+	w, err := history.Open(hdir, 1<<20, time.Hour, func() time.Time { return time.Unix(start, 0) }, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, s, today, _, cl := runCity(t, dir, w)
-	clock = cl
+	c, s, today, _, _ := runCity(t, dir, w)
 	s.hist = w
 	// The health file was just saved: the log would wait up to a minute.
 	c.mu.Lock()

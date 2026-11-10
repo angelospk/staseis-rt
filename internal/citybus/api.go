@@ -88,7 +88,11 @@ func motionObj(m Motion) obj {
 func (c *City) v2Vehicle(p Placed) obj {
 	mo := motionObj(motion(&p))
 	mo["path_speeds"], mo["knots"] = nil, nil
-	return obj{"id": c.lid(p.S.ID), "line": c.lid(p.Route.Line), "run": nil, "mode": "bus", "headsign": p.Route.Name, "label": nil,
+	var run any
+	if t, date, _ := c.runOfRoute(p.Route, p.S.ID); t != nil {
+		run = c.Conf.ID + ":run:" + t.ID + ":" + date
+	}
+	return obj{"id": c.lid(p.S.ID), "line": c.lid(p.Route.Line), "run": run, "mode": "bus", "headsign": p.Route.Name, "label": nil,
 		"position": obj{"kind": p.Kind, "lat": p.Lat, "lon": p.Lon, "bearing": p.Bearing, "at": p.At},
 		"delay_s":  nil, "next_stop": c.lid(p.Route.Stops[p.NextIdx]), "at_terminus": false, "direction": p.Route.Dir,
 		"motion": mo, "source": c.Conf.ID}
@@ -104,6 +108,46 @@ func v1Vehicle(p Placed, full bool) obj {
 		o["path_speeds"] = nil
 	}
 	return o
+}
+
+// runOfRoute: the trip a vehicle code names on this route (nil when the code names no run or no
+// trip of the route leaves then), the code's service date, and its label: "HH:MM FIRST → LAST",
+// where the stops are the trip's first and last timed stops, or the route's ends without a trip.
+func (c *City) runOfRoute(r *Route, code string) (*Trip, string, string) {
+	date, dep, ok := runCode(code)
+	if !ok {
+		return nil, "", ""
+	}
+	_, weekday, ok := dayBase(date)
+	if !ok {
+		return nil, "", ""
+	}
+	t := tripOf(r, weekday, dep)
+	first, last := -1, -1
+	if t != nil {
+		for i, x := range t.Times {
+			if x == NoTime {
+				continue
+			}
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	} else if r != nil && len(r.Stops) > 0 {
+		first = 0
+		last = len(r.Stops) - 1
+	}
+	name := func(i int) string {
+		if r == nil || i < 0 || i >= len(r.Stops) {
+			return ""
+		}
+		if s := c.model.Stops[r.Stops[i]]; s != nil {
+			return s.Name
+		}
+		return ""
+	}
+	return t, date, hhmm(dep) + " " + name(first) + " → " + name(last)
 }
 
 func (c *City) status() obj {
@@ -246,7 +290,13 @@ func (c *City) v1Line(code string) obj {
 	vs := []obj{}
 	for _, p := range c.live.placed(now, code) {
 		o := v1Vehicle(p, true)
-		o["route_code"], o["trip_id"], o["trip_label"], o["next_stop_id"] = p.Route.Code, nil, nil, p.Route.Stops[p.NextIdx]
+		var tripID, label any
+		if t, _, l := c.runOfRoute(p.Route, p.S.ID); t != nil {
+			tripID, label = t.ID, l
+		} else if l != "" {
+			label = l
+		}
+		o["route_code"], o["trip_id"], o["trip_label"], o["next_stop_id"] = p.Route.Code, tripID, label, p.Route.Stops[p.NextIdx]
 		vs = append(vs, o)
 	}
 	return obj{"line": code, "updated_at": now, "next_update_at": now + 10, "vehicles": vs}
@@ -391,21 +441,37 @@ func (c *City) v2Run(id string) obj {
 				stops = append(stops, obj{"stop": c.lid(s), "scheduled_at": at, "at": at, "delay_s": nil, "source": "timetable",
 					"platform": nil, "passed": at < now-60})
 			}
-			return obj{"run": obj{"id": id, "line": c.lid(r.Line), "headsign": r.Name, "pattern": c.lid(r.Code), "vehicle": nil,
-				"vehicle_label": nil, "status": "scheduled", "stops": stops}, "sources": c.sourcesLocked()}
+			// running: a bus was counted on this run, it is the run's trip, and it is fresh.
+			var vehicle any
+			status := "scheduled"
+			first := firstTime(t)
+			if rep := tripOf(r, clock.Day, first); rep != nil && rep.ID == t.ID {
+				if rs := c.runs.seen(clock.Date, r.Code, first); rs != nil && now-rs.Last <= MaxAge {
+					vehicle, status = c.lid(rs.Veh), "running"
+				}
+			}
+			return obj{"run": obj{"id": id, "line": c.lid(r.Line), "headsign": r.Name, "pattern": c.lid(r.Code), "vehicle": vehicle,
+				"vehicle_label": nil, "status": status, "stops": stops}, "sources": c.sourcesLocked()}
 		}
 	}
 	return nil
 }
 
-func (c *City) schedule(code string) obj {
+func (c *City) schedule(code string) (obj, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	l := c.model.LineByCode[code]
 	if l == nil {
-		return nil
+		return nil, 0
 	}
-	clock := athensClock(c.unix())
+	now := c.unix()
+	clock := athensClock(now)
+	// The cache: a minute, less while a run is live (its mark ends MaxAge after the last sighting)
+	// and never past midnight (the next day is another timetable).
+	maxAge := 60
+	if left := int(86400 - clock.Sec); left < maxAge {
+		maxAge = max(0, left)
+	}
 	dirs := []obj{}
 	for _, d := range []int{0, 1} {
 		var routes []*Route
@@ -420,6 +486,7 @@ func (c *City) schedule(code string) obj {
 		type dep struct {
 			s    int
 			trip string
+			code string
 		}
 		var deps []dep
 		count := map[string]int{}
@@ -431,7 +498,7 @@ func (c *City) schedule(code string) obj {
 				}
 				for _, x := range t.Times {
 					if x != NoTime {
-						deps = append(deps, dep{x, t.ID})
+						deps = append(deps, dep{x, t.ID, r.Code})
 						break
 					}
 				}
@@ -440,7 +507,20 @@ func (c *City) schedule(code string) obj {
 		sort.SliceStable(deps, func(i, j int) bool { return deps[i].s < deps[j].s })
 		out := []obj{}
 		for _, x := range deps {
-			out = append(out, obj{"t": hhmm(x.s), "trip": x.trip, "seen": false})
+			o := obj{"t": hhmm(x.s), "trip": x.trip}
+			// seen: a bus was counted on this run, and this trip is the one the run names (two
+			// trips at one time: only the first gets the mark).
+			r := c.model.Routes[x.code]
+			if run := c.runs.seen(clock.Date, x.code, x.s); run != nil && r != nil {
+				if t := tripOf(r, clock.Day, x.s); t != nil && t.ID == x.trip {
+					o["seen"] = true
+					if now-run.Last <= MaxAge {
+						o["live"] = true
+						maxAge = min(maxAge, int(max(MaxAge-(now-run.Last), 0)))
+					}
+				}
+			}
+			out = append(out, o)
 		}
 		// The headsign of the most routes (the first one on a tie).
 		headsign, best := "", 0
@@ -451,7 +531,7 @@ func (c *City) schedule(code string) obj {
 		}
 		dirs = append(dirs, obj{"direction": d, "headsign": headsign, "departures": out})
 	}
-	return obj{"line": code, "date": clock.Date, "expired": false, "source": "citybus", "directions": dirs}
+	return obj{"line": code, "date": clock.Date, "expired": false, "source": "citybus", "directions": dirs}, maxAge
 }
 
 func (c *City) debug() obj {
