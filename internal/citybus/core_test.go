@@ -906,3 +906,19 @@ func TestMotionEndsWhereTheMapWaits(t *testing.T) {
 		t.Fatalf("waiting before B: no path on: %+v", motion(&w))
 	}
 }
+
+// A bus seen 10 m before B has not passed it: the map waits there, so the board of B, which still
+// lists it, does not pull it back (#145, review).
+func TestLiveCityBusJustBeforeAStopWaitsThere(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.10989", 2, "v")}}) // ~898 m, B at ~908 m
+	first := l.placed(1060, "")[0]
+	if first.M > 908 {
+		t.Fatalf("shown at %.0f, past B which no board has seen it pass", first.M)
+	}
+	l.add(Board{Stop: "B", At: 1070, Rows: []LiveRow{row("10", "35.3", "25.10989", 1, "v")}}) // still due at B
+	if p := l.placed(1070, "")[0]; p.M < first.M {
+		t.Fatalf("went back from %.0f to %.0f", first.M, p.M)
+	}
+}
