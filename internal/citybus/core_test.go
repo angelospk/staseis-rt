@@ -783,20 +783,55 @@ func TestLiveCityStandingOverShortSightings(t *testing.T) {
 	}
 }
 
-// A standing bus that an estimate had moved on is shown back at its point, not held ahead (#139, review).
-func TestLiveCityStandingBusIsNotHeldAhead(t *testing.T) {
+// A standing bus that an estimate had moved on stays where the map showed it: it never goes back (#145).
+func TestLiveCityStandingBusIsHeldNotPulledBack(t *testing.T) {
 	m := buildModel(lineRaw())
 	l := newLiveCity(m)
 	at := func(ts int64) {
-		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", "25.11", 2, "v")}})
+		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m
 	}
 	at(1000)
-	l.placed(1015, "") // moved on ~225 m
+	first := l.placed(1015, "")[0] // moved on ~225 m
 	at(1010)
 	l.placed(1019, "")
 	at(1020)
-	if p := l.placed(1020, ""); p[0].M != l.Buses["v"].M {
-		t.Fatalf("standing bus held ahead at %.0f, its point is %.0f", p[0].M, l.Buses["v"].M)
+	if l.Buses["v"].Speed != nil {
+		t.Fatal("20 s at one point is standing")
+	}
+	p := l.placed(1020, "")[0]
+	if p.M < first.M {
+		t.Fatalf("standing bus went back from %.0f to %.0f", first.M, p.M)
+	}
+	if p.EstM != l.Buses["v"].M {
+		t.Fatalf("stop ETAs count from the standing point %.0f, not %.0f", l.Buses["v"].M, p.EstM)
+	}
+}
+
+// The map never runs a bus past the next stop ahead of its sighting: a board of that stop would
+// pull it back. ETAs still use the estimate without the cap (#145).
+func TestLiveCityMapWaitsBeforeTheNextStop(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m, B at ~908 m
+	p := l.placed(1060, "")[0]                                                               // 15 m/s: ~1354 m
+	if p.M > 908-20+1 {
+		t.Fatalf("shown at %.0f, past B (~908 m) which no board has seen it pass", p.M)
+	}
+	if p.EstM < 1300 {
+		t.Fatalf("ETAs use the estimate without the cap: %.0f", p.EstM)
+	}
+}
+
+// A board of the nearer stop still lists the bus: the map does not pull it back (#145).
+func TestLiveCityNearerBoardDoesNotPullBack(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}}) // ~454 m
+	first := l.placed(1035, "")[0]
+	l.add(Board{Stop: "B", At: 1040, Rows: []LiveRow{row("10", "35.3", "25.1085", 1, "v")}}) // ~771 m, due at B
+	p := l.placed(1040, "")[0]
+	if p.M < first.M {
+		t.Fatalf("went back from %.0f to %.0f", first.M, p.M)
 	}
 }
 
@@ -833,10 +868,10 @@ func TestEstimatesIgnoreTheHold(t *testing.T) {
 	m := buildModel(lineRaw())
 	l := newLiveCity(m)
 	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}})  // ~454 m
-	l.placed(1035, "")                                                                       // moved on at 15 m/s to ~979 m, past B (~908 m)
+	l.placed(1035, "")                                                                       // moved on at 15 m/s; the map waits 20 m before B (~908 m)
 	l.add(Board{Stop: "D", At: 1040, Rows: []LiveRow{row("10", "35.3", "25.1085", 2, "v")}}) // ~771 m, before B
 	p := l.placed(1040, "")[0]
-	if p.M < 970 {
+	if p.M < 880 {
 		t.Fatalf("the map holds the bus: %.0f", p.M)
 	}
 	if a := estimates("B", []Placed{p}, 1040); len(a) != 1 {
