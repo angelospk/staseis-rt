@@ -186,14 +186,15 @@ func TestSightingsPlaceAndMaxAge(t *testing.T) {
 		t.Fatalf("placed now %+v", now)
 	}
 	later := place(m, s[0], 1120)
-	// The estimate reaches the board's stop D; the map waits 20 m before C, the next stop (#145).
-	if later.Kind != "estimate" || later.EstM <= s[0].ToM-30 || later.EstM > s[0].ToM {
+	// The estimate reaches the board's stop D; the map waits at B, which the bus is seen at and
+	// has not passed (#145).
+	if later.EstM <= s[0].ToM-30 || later.EstM > s[0].ToM {
 		t.Fatalf("later est %v (to %v)", later.EstM, s[0].ToM)
 	}
-	if c := m.Routes["10"].StopM[2]; later.M != c-20 {
-		t.Fatalf("later shown at %v, want 20 m before C at %v", later.M, c)
+	if later.Kind != "gps" || later.M != s[0].M {
+		t.Fatalf("later shown at %v (%s), want the sighting at B %v", later.M, later.Kind, s[0].M)
 	}
-	if later.At != 1120 || now.At != 1000 {
+	if later.At != 1000 || now.At != 1000 {
 		t.Fatalf("at: gps keeps the sighting time, estimate is now: %d %d", now.At, later.At)
 	}
 	if MaxAge != 120 || place(m, s[0], 1000+121) != nil {
@@ -333,10 +334,15 @@ func TestLoopBusOnTheWayBack(t *testing.T) {
 
 func TestMotionStopsAtDueStop(t *testing.T) {
 	m := buildModel(lineRaw())
-	s := sightings(m, Board{Stop: "C", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.11", 2, "v")}})[0]
+	s := sightings(m, Board{Stop: "C", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.1105", 2, "v")}})[0] // ~45 m past B
 	mo := motion(place(m, s, 1000))
-	if len(mo.PathStops) == 0 || mo.PathStops[len(mo.PathStops)-1] > int(math.Round(s.ToM-s.M))+1 {
+	// The path ends 20 m before the due stop C, where the map waits for it (#145).
+	if len(mo.PathStops) != 0 {
 		t.Fatalf("path stops %v (to %v)", mo.PathStops, s.ToM-s.M)
+	}
+	r := m.Routes["10"]
+	if q := pointAt(r.Shape, r.Cum, s.ToM-20); len(mo.Path) > 0 && dist(mo.Path[len(mo.Path)-1], LL{q[0], q[1]}) > 1 {
+		t.Fatalf("path ends at %v, want 20 m before C %v", mo.Path[len(mo.Path)-1], q)
 	}
 	if mo.PathBeyond != nil {
 		t.Fatalf("path beyond %v", mo.PathBeyond)

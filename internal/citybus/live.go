@@ -97,6 +97,11 @@ func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 		moved = math.Min(s.ToM, s.M+*s.Speed*float64(age))
 	}
 	est := moved
+	// The map never runs past the next stop ahead of the sighting: no board has seen the bus pass
+	// it, and the next board of that stop would pull it back (#145). ETAs keep est.
+	if c := nextStopCap(route, s.M); moved > c {
+		moved = c
+	}
 	if floor > moved && floor-moved <= backHold {
 		moved = floor
 	}
@@ -130,10 +135,24 @@ func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 	return &Placed{S: s, Route: route, Lat: lat, Lon: lon, M: m, EstM: est, At: at, Kind: kind, Bearing: brg, NextIdx: nextIdx}
 }
 
+// nextStopCap is how far the map may move a bus seen at m: 20 m before the first stop it has not
+// passed, or the end of the shape after the last stop. A stop up to 30 m behind m is not passed
+// yet: its board can still list the bus (as in sightings).
+func nextStopCap(r *Route, m float64) float64 {
+	for _, x := range r.StopM {
+		if x >= m-30 {
+			return math.Max(m, x-20)
+		}
+	}
+	return r.Cum[len(r.Cum)-1]
+}
+
 // motion is the path ahead for the client's mover: up to 1.5 km, then on to the third stop.
 func motion(p *Placed) Motion {
 	r := p.Route
 	end := math.Min(r.Cum[len(r.Cum)-1], p.S.ToM) // never past the stop the bus was due at
+	// nor past where the map waits for it (#145): a client driving on would be pulled back.
+	end = math.Min(end, nextStopCap(r, p.S.M))
 	if end-p.M < 5 {
 		return Motion{}
 	}
@@ -237,9 +256,9 @@ func (l *liveCity) placed(now int64, line string) []Placed {
 	out := []Placed{}
 	for id, s := range l.Buses {
 		floor := -1.0
-		// Only a moving bus is held: a standing one is shown at its point. Never past the stop
-		// the newest board says it is still due at.
-		if last, ok := l.shown[id]; ok && last.route == s.Route && s.Speed != nil {
+		// A bus is held at the last point shown, standing or moving, so it never goes back (#145).
+		// Never past the stop the newest board says it is still due at.
+		if last, ok := l.shown[id]; ok && last.route == s.Route {
 			floor = math.Min(last.m, s.ToM-20)
 		}
 		p := placeFrom(l.model, s, now, floor)
