@@ -23,6 +23,12 @@ const maxInflight = 3
 // hotEvery: a watched line's board takes at most one read in this many.
 const hotEvery = 4
 
+// hubCount: how many busiest stops (most lines) get a board read every 30 s.
+const hubCount = 5
+
+// boardWait: how long a user waits for a stop board when the city has none to show.
+var boardWait = 8 * time.Second
+
 // idleWait: with no live line to rotate over, the timetable-only checks run this often.
 var idleWait = 30 * time.Second
 
@@ -96,8 +102,10 @@ type City struct {
 	probes      []string
 	checkProbes map[string][]string // timetable-only line -> its probe stops
 	skipped     map[string]bool     // lines with no live bus for Days
+	hubs        []string            // busiest stops, read every 30 s
 	watched     map[string]int64    // line -> watched until (unix s)
 	hotAsked    map[string]int64    // stop -> last read for a watched line (unix s)
+	hubAsked    map[string]int64    // stop -> last hub read (unix s)
 	userAsked   map[string]int64    // stop -> last user read of its board, failed or not (unix s)
 	userWait    map[string]*pending // stop -> the user read in flight, joined by later callers
 	svc         context.Context     // the service: user reads run on it, not on the request
@@ -112,7 +120,7 @@ func newCity(conf Conf, up fetcher, stateDir string, log *slog.Logger) (*City, e
 		return nil, err
 	}
 	c := &City{Conf: conf, up: up, dir: dir, log: log.With("city", conf.ID), now: time.Now,
-		checkProbes: map[string][]string{}, skipped: map[string]bool{}, watched: map[string]int64{}, hotAsked: map[string]int64{}, userAsked: map[string]int64{}, userWait: map[string]*pending{},
+		checkProbes: map[string][]string{}, skipped: map[string]bool{}, watched: map[string]int64{}, hotAsked: map[string]int64{}, hubAsked: map[string]int64{}, userAsked: map[string]int64{}, userWait: map[string]*pending{},
 		svc: context.Background(), boards: make(chan struct{}, maxInflight)}
 	c.health = loadHealth(filepath.Join(dir, "health.json"), c.unix())
 	return c, nil
@@ -301,10 +309,11 @@ func (c *City) install(raw *RawCity) {
 
 // refreshProbesLocked splits the lines in two: the lines with a live bus (rotated every cycle) and
 // the timetable-only lines (one check probe per cycle, so a line that starts sending GPS comes
-// back). It also sets the city's gap: one rotation in about 60 s.
+// back). It also picks the hub stops (the busiest ones get a board every 30 s) and sets the
+// city's gap: one rotation in about 60 s, hubs counted as two reads each.
 func (c *City) refreshProbesLocked(now int64) {
 	if c.model == nil {
-		c.probes, c.checkProbes = nil, map[string][]string{}
+		c.probes, c.checkProbes, c.hubs = nil, map[string][]string{}, nil
 		return
 	}
 	codes := make([]string, 0, len(c.model.Lines))
@@ -319,6 +328,7 @@ func (c *City) refreshProbesLocked(now int64) {
 		}
 	}
 	c.probes = probeStops(c.model, c.skipped)
+	c.hubs = hubStops(c.model, hubCount)
 	c.checkProbes = map[string][]string{}
 	for l := range c.skipped {
 		others := map[string]bool{}
@@ -329,7 +339,7 @@ func (c *City) refreshProbesLocked(now int64) {
 		}
 		c.checkProbes[l] = probeStops(c.model, others)
 	}
-	c.up.pacer().setGap(time.Duration(gapFor(len(c.probes)+len(c.skipped)+1)) * time.Millisecond)
+	c.up.pacer().setGap(time.Duration(gapFor(len(c.probes)+len(c.skipped)+1+2*len(c.hubs))) * time.Millisecond)
 }
 
 func (c *City) refreshProbes() {
@@ -511,6 +521,9 @@ func (c *City) rotate(ctx context.Context) {
 		if hot != "" {
 			sinceHot = 0
 			read(hot, priWatched, false)
+		} else if h := c.dueHub(now); h != "" {
+			// A hub board shows many arrivals at once: keep the busiest stops fresh every 30 s.
+			read(h, priBackground, false)
 		} else {
 			sinceHot++
 			read(probes[i%len(probes)], priBackground, true)
@@ -610,11 +623,76 @@ type pending struct {
 	b    *Board
 }
 
+// hubStops: the busiest stops (at least 2 lines), the most lines first, then the most routes
+// through them, then the code; the first n. A hub board shows many arrivals at once, so a few
+// stops read often serve most users.
+func hubStops(m *Model, n int) []string {
+	if m == nil {
+		return nil
+	}
+	routes := map[string]int{} // stop -> routes through it (each route once)
+	for _, r := range m.Routes {
+		seen := map[string]bool{}
+		for _, s := range r.Stops {
+			if !seen[s] {
+				seen[s] = true
+				routes[s]++
+			}
+		}
+	}
+	codes := make([]string, 0, len(m.Stops))
+	for code, s := range m.Stops {
+		if len(s.Lines) >= 2 {
+			codes = append(codes, code)
+		}
+	}
+	sort.Slice(codes, func(i, j int) bool {
+		a, b := m.Stops[codes[i]], m.Stops[codes[j]]
+		if len(a.Lines) != len(b.Lines) {
+			return len(a.Lines) > len(b.Lines)
+		}
+		if routes[codes[i]] != routes[codes[j]] {
+			return routes[codes[i]] > routes[codes[j]]
+		}
+		return codes[i] < codes[j]
+	})
+	if len(codes) > n {
+		codes = codes[:n]
+	}
+	return codes
+}
+
+// dueHub: the first hub stop whose board is missing or 30 s old and was not read in the last 30 s;
+// "" when none. It marks the stop as asked, so the next call takes the next hub.
+func (c *City) dueHub(now int64) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, h := range c.hubs {
+		var at int64
+		if c.live != nil {
+			if b, ok := c.live.Boards[h]; ok {
+				at = b.At
+			}
+		}
+		if at > now-30 {
+			continue // a fresh board: nothing to refresh
+		}
+		if c.hubAsked[h] > now-30 {
+			continue
+		}
+		c.hubAsked[h] = now
+		return h
+	}
+	return ""
+}
+
 // freshBoard: a stop board from the cache when under 15 s old, else one request at user
-// priority; after 8 s the cached one (or none). A caller joins a read of the same stop that is
+// priority; after 8 s the cached one (or none). A cached board up to MaxAge old is shown at once,
+// with the read running behind it, so a user never waits for a board the city still has; the
+// bool says a read of this stop is in flight. A caller joins a read of the same stop that is
 // in flight. A stop is asked at most once per 15 s, failed or not. The request runs on the
 // service context (bounded to 20 s), not on the user's request: other callers share its answer.
-func (c *City) freshBoard(code string) *Board {
+func (c *City) freshBoard(code string) (*Board, bool) {
 	c.mu.Lock()
 	var cached *Board
 	if c.live != nil {
@@ -623,15 +701,18 @@ func (c *City) freshBoard(code string) *Board {
 		}
 	}
 	now := c.unix()
+	if cached != nil && now-cached.At > MaxAge { // not pruned yet: too old to show
+		cached = nil
+	}
 	if cached != nil && now-cached.At < 15 {
 		c.mu.Unlock()
-		return cached
+		return cached, false
 	}
 	p := c.userWait[code]
 	if p == nil {
 		if now-c.userAsked[code] < 15 {
 			c.mu.Unlock()
-			return cached
+			return cached, false
 		}
 		c.userAsked[code] = now
 		p = &pending{done: make(chan struct{})}
@@ -649,17 +730,22 @@ func (c *City) freshBoard(code string) *Board {
 			close(p.done)
 		}()
 	}
+	refreshing := c.userWait[code] != nil
 	c.mu.Unlock()
-	t := time.NewTimer(8 * time.Second)
+	if cached != nil { // a stale but usable board: show it, the read above fills it in behind
+		return cached, refreshing
+	}
+	t := time.NewTimer(boardWait)
 	defer t.Stop()
 	select {
 	case <-p.done:
 		if p.b != nil {
-			return p.b
+			return p.b, false
 		}
+		return cached, false
 	case <-t.C:
+		return cached, true // the read goes on: the client asks again soon
 	}
-	return cached
 }
 
 // contentHash: sha256 of everything the model is built from (not BuiltAt, Version, Hash). Written

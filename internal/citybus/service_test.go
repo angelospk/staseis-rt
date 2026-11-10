@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -1132,4 +1133,49 @@ func TestHubsCountInTheGap(t *testing.T) {
 	if got := int(c.up.pacer().gapNow() / time.Millisecond); got != want {
 		t.Fatalf("gap %d want %d (probes %d hubs %d)", got, want, len(c.probes), len(c.hubs))
 	}
+}
+
+// A board older than MaxAge that prune has not dropped yet is never shown: the user waits for a new one.
+func TestBoardOverMaxAgeIsNotShown(t *testing.T) {
+	f := &fake{answers: answersOf(lineRaw())}
+	f.hook = func(path string) (any, bool, error) {
+		if strings.Contains(path, "/stops/live/") {
+			return liveAnswer{Vehicles: []LiveRow{}}, true, nil
+		}
+		return nil, false, nil
+	}
+	c := testCity(t, f, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	old := c.unix() - MaxAge - 5
+	c.mu.Lock()
+	c.live.Boards["B"] = Board{Stop: "B", At: old}
+	c.mu.Unlock()
+	if b, r := c.freshBoard("B"); b == nil || b.At <= old || r {
+		t.Fatalf("board %+v refreshing %v", b, r)
+	}
+}
+
+// A user who gave up waiting hears that the read goes on, so the client asks again soon (codex).
+func TestBoardWaitOverSaysRefreshing(t *testing.T) {
+	old := boardWait
+	boardWait = 20 * time.Millisecond
+	defer func() { boardWait = old }()
+	f := &fake{answers: answersOf(lineRaw())}
+	f.hook = func(path string) (any, bool, error) {
+		if strings.Contains(path, "/stops/live/") {
+			time.Sleep(150 * time.Millisecond)
+			return liveAnswer{Vehicles: []LiveRow{}}, true, nil
+		}
+		return nil, false, nil
+	}
+	c := testCity(t, f, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if b, r := c.freshBoard("B"); b != nil || !r {
+		t.Fatalf("board %+v refreshing %v", b, r)
+	}
+	time.Sleep(200 * time.Millisecond)
 }
