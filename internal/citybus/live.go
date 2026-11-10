@@ -194,6 +194,7 @@ type liveCity struct {
 type shownAt struct {
 	route string
 	m     float64
+	at    int64 // unix s it was shown
 }
 
 func newLiveCity(m *Model) *liveCity {
@@ -259,13 +260,19 @@ func (l *liveCity) placed(now int64, line string) []Placed {
 		// A bus is held at the last point shown, standing or moving, so it never goes back (#145).
 		// Never past the stop the newest board says it is still due at.
 		if last, ok := l.shown[id]; ok && last.route == s.Route {
-			floor = math.Min(last.m, s.ToM-20)
+			floor = last.m
+			// The client drove the dot on from there at the bus's speed: so does the hold, up to
+			// where the map waits, or a new board with the same GPS point would put it back.
+			if r := l.model.Routes[s.Route]; r != nil && s.Speed != nil && now > last.at {
+				floor = math.Max(last.m, math.Min(last.m+*s.Speed*float64(now-last.at), nextStopCap(r, s.M)))
+			}
+			floor = math.Min(floor, s.ToM-20)
 		}
 		p := placeFrom(l.model, s, now, floor)
 		if p == nil {
 			continue
 		}
-		l.shown[id] = shownAt{route: s.Route, m: p.M}
+		l.shown[id] = shownAt{route: s.Route, m: p.M, at: now}
 		if line == "" || p.Route.Line == line {
 			out = append(out, *p)
 		}
