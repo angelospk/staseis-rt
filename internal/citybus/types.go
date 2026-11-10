@@ -245,6 +245,7 @@ type Arrival struct {
 	At        int64
 	Scheduled *int64
 	Live      bool
+	Estimate  bool   // a live row with no board behind it: the time is ours, from a tracked bus
 	Vehicle   string // "" when none
 	Trip      string // "" when none
 	Date      string // service date of a timetable run

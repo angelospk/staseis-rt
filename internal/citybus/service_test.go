@@ -774,9 +774,13 @@ func TestUserBoardAskedOncePer15sEvenWhenItFails(t *testing.T) {
 		if b, _ := c.freshBoard("B"); b != nil {
 			t.Fatalf("board %v", b)
 		}
+		time.Sleep(50 * time.Millisecond) // the read runs behind the answer
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("calls %d", calls.Load())
+	}
+	if _, refreshing := c.freshBoard("B"); refreshing {
+		t.Fatal("no read is in flight after the failed one")
 	}
 	if c.v1StopBoard("B") == nil {
 		t.Fatal("a failed board still gives the timetable")
@@ -911,19 +915,24 @@ func TestConcurrentUserReadsShareOneRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	var nils atomic.Int32
+	var told atomic.Int32
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if b, _ := c.freshBoard("B"); b == nil {
-				nils.Add(1)
+			if b, refreshing := c.freshBoard("B"); b == nil && refreshing {
+				told.Add(1)
 			}
 		}()
 	}
 	wg.Wait()
-	if calls.Load() != 1 || nils.Load() != 0 {
-		t.Fatalf("calls %d, callers without the board %d", calls.Load(), nils.Load())
+	// No caller waits for the board (rt#136): each hears that the one read is on its way.
+	if told.Load() != 4 {
+		t.Fatalf("callers told to ask again: %d of 4", told.Load())
+	}
+	time.Sleep(150 * time.Millisecond)
+	if b, refreshing := c.freshBoard("B"); calls.Load() != 1 || b == nil || refreshing {
+		t.Fatalf("calls %d, board %+v, refreshing %v", calls.Load(), b, refreshing)
 	}
 }
 
@@ -1135,7 +1144,7 @@ func TestHubsCountInTheGap(t *testing.T) {
 	}
 }
 
-// A board older than MaxAge that prune has not dropped yet is never shown: the user waits for a new one.
+// A board older than MaxAge that prune has not dropped yet is never shown: it counts as no board.
 func TestBoardOverMaxAgeIsNotShown(t *testing.T) {
 	f := &fake{answers: answersOf(lineRaw())}
 	f.hook = func(path string) (any, bool, error) {
@@ -1152,21 +1161,30 @@ func TestBoardOverMaxAgeIsNotShown(t *testing.T) {
 	c.mu.Lock()
 	c.live.Boards["B"] = Board{Stop: "B", At: old}
 	c.mu.Unlock()
-	if b, r := c.freshBoard("B"); b == nil || b.At <= old || r {
+	if b, r := c.freshBoard("B"); b != nil || !r {
 		t.Fatalf("board %+v refreshing %v", b, r)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if b, r := c.freshBoard("B"); b == nil || b.At <= old || r {
+		t.Fatalf("after the read: board %+v refreshing %v", b, r)
 	}
 }
 
-// A user who gave up waiting hears that the read goes on, so the client asks again soon (codex).
-func TestBoardWaitOverSaysRefreshing(t *testing.T) {
-	old := boardWait
-	boardWait = 20 * time.Millisecond
-	defer func() { boardWait = old }()
+// ---- estimated arrivals (rt#136 B): a stop with no board answers at once ----
+
+// A stop with no board never waits for citybus.gr: the answer comes at once, with the tracked bus
+// as an estimate and refreshing = true. Once the stop's own board is in, the board wins.
+func TestStopWithNoBoardAnswersAtOnceWithEstimates(t *testing.T) {
+	var calls atomic.Int32
 	f := &fake{answers: answersOf(lineRaw())}
 	f.hook = func(path string) (any, bool, error) {
-		if strings.Contains(path, "/stops/live/") {
+		switch {
+		case strings.HasSuffix(path, "/stops/live/B"): // the rotation saw v1, 1 min before B
+			return liveAnswer{Vehicles: []LiveRow{{LineCode: "1", RouteCode: "10", Latitude: 35.3, Longitude: 25.105, DepartureMins: 1, VehicleCode: "v1"}}}, true, nil
+		case strings.HasSuffix(path, "/stops/live/C"): // a slow board; citybus.gr gives v1 4 min
+			calls.Add(1)
 			time.Sleep(150 * time.Millisecond)
-			return liveAnswer{Vehicles: []LiveRow{}}, true, nil
+			return liveAnswer{Vehicles: []LiveRow{{LineCode: "1", RouteCode: "10", Latitude: 35.3, Longitude: 25.105, DepartureMins: 4, VehicleCode: "v1"}}}, true, nil
 		}
 		return nil, false, nil
 	}
@@ -1174,8 +1192,46 @@ func TestBoardWaitOverSaysRefreshing(t *testing.T) {
 	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
 		t.Fatal(err)
 	}
-	if b, r := c.freshBoard("B"); b != nil || !r {
-		t.Fatalf("board %+v refreshing %v", b, r)
+	if _, err := c.board(context.Background(), "B", priWatched); err != nil {
+		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	live := func(arrivals any) []map[string]any {
+		out := []map[string]any{}
+		for _, a := range arrivals.([]obj) {
+			if a["source"] == "live" {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	t0 := time.Now()
+	v1 := c.v1StopBoard("C")
+	if d := time.Since(t0); d > 50*time.Millisecond {
+		t.Fatalf("the answer waited %v for the board", d)
+	}
+	rows := live(v1["arrivals"])
+	if v1["refreshing"] != true || len(rows) != 1 || rows[0]["estimate"] != true || rows[0]["vehicle"] != "v1" {
+		t.Fatalf("v1 %v", v1)
+	}
+	if eta := rows[0]["eta_s"].(int64); eta < 170 || eta > 180 { // 1 min to B + 2 min B-C on the timetable
+		t.Fatalf("eta %d", eta)
+	}
+	v2 := c.v2StopBoard("t:C")
+	rows = live(v2["arrivals"])
+	if v2["refreshing"] != true || len(rows) != 1 || rows[0]["estimate"] != true || rows[0]["vehicle"] != "t:v1" || rows[0]["status"] != "running" {
+		t.Fatalf("v2 %v", v2)
+	}
+	time.Sleep(250 * time.Millisecond)
+	v1 = c.v1StopBoard("C")
+	rows = live(v1["arrivals"])
+	if calls.Load() != 1 || v1["refreshing"] != false || len(rows) != 1 || rows[0]["estimate"] != false {
+		t.Fatalf("with the board: calls %d, v1 %v", calls.Load(), v1)
+	}
+	if eta := rows[0]["eta_s"].(int64); eta < 230 || eta > 240 {
+		t.Fatalf("board eta %d", eta)
+	}
+	rows = live(c.v2StopBoard("t:C")["arrivals"])
+	if len(rows) != 1 || rows[0]["estimate"] != false {
+		t.Fatalf("v2 with the board: %v", rows)
+	}
 }
