@@ -96,6 +96,7 @@ func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 	if s.Speed != nil && age > 0 {
 		moved = math.Min(s.ToM, s.M+*s.Speed*float64(age))
 	}
+	est := moved
 	if floor > moved && floor-moved <= backHold {
 		moved = floor
 	}
@@ -126,7 +127,7 @@ func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 	if kind == "gps" {
 		at = s.Seen
 	}
-	return &Placed{S: s, Route: route, Lat: lat, Lon: lon, M: m, At: at, Kind: kind, Bearing: brg, NextIdx: nextIdx}
+	return &Placed{S: s, Route: route, Lat: lat, Lon: lon, M: m, EstM: est, At: at, Kind: kind, Bearing: brg, NextIdx: nextIdx}
 }
 
 // motion is the path ahead for the client's mover: up to 1.5 km, then on to the third stop.
@@ -195,11 +196,14 @@ func (l *liveCity) add(b Board) []Sighting {
 		old, ok := l.Buses[s.ID]
 		// Newer wins; at the same time, the board of the nearer stop (its minutes are surer).
 		if !ok || s.Seen > old.Seen || (s.Seen == old.Seen && s.ToM-s.M < old.ToM-old.M) {
-			s.Since = s.Seen
-			if ok && s.Route == old.Route && math.Abs(s.M-old.M) < standStill {
-				s.Since = old.Seen
-				if old.Since != 0 {
-					s.Since = old.Since
+			s.Since, s.SinceM = s.Seen, s.M
+			if ok && s.Route == old.Route {
+				since, sinceM := old.Since, old.SinceM
+				if since == 0 {
+					since, sinceM = old.Seen, old.M
+				}
+				if math.Abs(s.M-sinceM) < standStill {
+					s.Since, s.SinceM = since, sinceM
 				}
 			}
 			if s.Seen-s.Since >= standSecs {
@@ -351,8 +355,8 @@ func estimateAt(p *Placed, k int, now int64, days [3]serviceDay) int64 {
 		return max(now, s.ETA+ride)
 	}
 	due := max(now, s.ETA) // the bus is not at the anchor yet
-	soonest := now + int64(math.Round((x-p.M)/maxSpeed))
-	at := now + int64(math.Round(float64(due-now)*(x-p.M)/(s.ToM-p.M)))
+	soonest := now + int64(math.Round((x-p.EstM)/maxSpeed))
+	at := now + int64(math.Round(float64(due-now)*(x-p.EstM)/(s.ToM-p.EstM)))
 	if a >= 0 && k <= a {
 		if t, ok := rideSecs(r, k, a, a, s.ETA, days, s.ToM-x); ok {
 			at = s.ETA - t
@@ -370,7 +374,7 @@ func estimates(stop string, placed []Placed, now int64) []Arrival {
 		p := &placed[i]
 		r := p.Route
 		for k, c := range r.Stops {
-			if c != stop || k >= len(r.Stops)-1 || r.StopM[k] <= p.M+15 {
+			if c != stop || k >= len(r.Stops)-1 || r.StopM[k] <= p.EstM+15 {
 				continue
 			}
 			at := estimateAt(p, k, now, days)

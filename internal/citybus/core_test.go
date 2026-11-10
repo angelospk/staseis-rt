@@ -815,3 +815,31 @@ func TestLiveCityHoldStopsBeforeTheDueStop(t *testing.T) {
 		t.Fatalf("stop C is still due: %+v", a)
 	}
 }
+
+// A bus that crawls 10 m every 10 s is moving, not standing: standing counts from where it stopped (#139, review 2).
+func TestLiveCityCrawlingBusIsNotStanding(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	for i, lon := range []string{"25.11", "25.1101", "25.1102", "25.1103", "25.1104"} { // ~9 m apart
+		l.add(Board{Stop: "D", At: 1000 + int64(i)*10, Rows: []LiveRow{row("10", "35.3", lon, 2, "v")}})
+	}
+	if l.Buses["v"].Speed == nil {
+		t.Fatal("36 m in 40 s is moving")
+	}
+}
+
+// Stop ETAs come from where the bus is, not from where the map holds it (#139, review 2).
+func TestEstimatesIgnoreTheHold(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.105", 2, "v")}})  // ~454 m
+	l.placed(1035, "")                                                                       // moved on at 15 m/s to ~979 m, past B (~908 m)
+	l.add(Board{Stop: "D", At: 1040, Rows: []LiveRow{row("10", "35.3", "25.1085", 2, "v")}}) // ~771 m, before B
+	p := l.placed(1040, "")[0]
+	if p.M < 970 {
+		t.Fatalf("the map holds the bus: %.0f", p.M)
+	}
+	if a := estimates("B", []Placed{p}, 1040); len(a) != 1 {
+		t.Fatalf("stop B is still ahead of the bus: %+v", a)
+	}
+}
