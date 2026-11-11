@@ -59,6 +59,14 @@ cities; `/` and `/{city}/debug` show the rotation state.
   city code (`cfu:2A`, `cfu:20261110_4_0100000_17_20`: codes repeat across cities), `fix_t` is the
   time the board was read, `trip_id` the run from the code (empty when none), `s_m` the metre on
   the route shape; `shape_id`, `delay_s`, `run_start`, `start_delay_s` are empty. Off by default.
+- History releases (#152): `atrt history-release` uploads each finished local day of the shared
+  history (all cities, the rows as written) as `citybus-history-YYYY-MM-DD.csv.gz` to the GitHub
+  Release `history-citybus-YYYY-MM` (created when missing, never marked latest). A day goes up only
+  when it is over by `Settle` (4 h), every hour it needs is gzipped and the history holds a file
+  older than its start (so not the first, partial day, nor a pruned one). A day whose asset exists
+  is skipped, so re-runs upload nothing twice. On the VPS: `deploy/atrt-history-release.{service,timer}`,
+  token in `GITHUB_TOKEN` (Contents: write on this repo only). `veh` holds the citybus.gr vehicle
+  code: a run slot, or for some buses the tracker's device id, both already public in `/v1/vehicles`.
 - Daily statistics (#151), with `--history` only: every hour each city sums its finished days from
   its own rows (`line` starts with its code) into `<state>/<slug>/stats`, in the format of
   [API.md](API.md#daily-statistics), served at `/{code}/v1/stats` and `/{code}/v1/stats/days/{date}`.

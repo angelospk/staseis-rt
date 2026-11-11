@@ -1,0 +1,14 @@
+# Uploads the finished days of the citybus.gr fix history to GitHub Releases (staseis-rt#152).
+# Runs the binary of the running atrt-citybus container, which reads its own history volume.
+# /etc/atrt/history-release.env (mode 600, root) holds one line: GITHUB_TOKEN=<fine-grained token,
+# Contents: read and write on angelospk/staseis-rt only>.
+# HISTORY: the container's <state>/history (the --state of its serve command + /history).
+[Unit]
+Description=atrt: citybus fix history to GitHub Releases
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=HISTORY=/var/lib/atrt/history
+ExecStart=/usr/bin/docker exec --env-file /etc/atrt/history-release.env atrt-citybus atrt history-release --history ${HISTORY}
