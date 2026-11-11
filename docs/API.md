@@ -511,12 +511,13 @@ a bus between trips of one direction does not end it). It goes on while each row
 has at least 2 rows with a position, starts in the day, ends at 10% of its shape or more, and
 never reached 90%. It is `vanished` when the vehicle's next row (matched or not) comes 15 min or
 more later, or never. It is `short_turn` when that row comes sooner and the vehicle's next matched
-row with a position is on the same line (the other direction, or back at the start); sooner but
-on another line, or never matched again, counts as neither. A GPS gap of less than 30 min after
+row with a position is on the same line and turned (the other direction, or more than half of the
+route behind on the same one); sooner but on another line, further on along the same direction
+after a 30 min gap, or never matched again, counts as neither. A GPS gap of less than 30 min after
 which the bus goes on along the same run is no cut. Limits: a server outage of 15 min or more
 makes every bus then mid-route `vanished`; a bus that turns back before 10% or after 90% of its
 route, or that drives back to the start of the same direction from less than half of it, is not
-counted.
+counted; nor is a turn onto a trip that starts on the next day (after midnight).
 
 ### Start delays (`start_delay`)
 

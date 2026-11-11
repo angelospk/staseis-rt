@@ -34,8 +34,9 @@ const (
 	//   - vanished: the vehicle's next fix comes VanishGap or more later, or never. Any row of the
 	//     vehicle is a fix here, matched or not, with a position or not;
 	//   - short-turn: the next fix comes sooner, and the next matched fix with a position is on
-	//     the same line (the other direction, or back at the start of the same direction). Sooner
-	//     but on another line, or never matched again, counts as neither.
+	//     the same line and turned: on the other direction, or more than RunBack of the route
+	//     behind on the same one (back at the start). Sooner but on another line, further on along
+	//     the same direction (after TripSlack), or never matched again counts as neither.
 	// A gap shorter than TripSlack after which the bus goes on along the same run is no cut.
 	CutLow    = 0.1
 	CutHigh   = 0.9
@@ -363,7 +364,7 @@ func (c *tripCounter) cut(t int64, veh, trip string, sm float64) {
 		return
 	}
 	if r != nil {
-		c.endRun(r, t, line)
+		c.endRun(r, t, line == r.line && (key != r.key || share < r.at-RunBack))
 	}
 	c.runs[veh] = &cutRun{key: key, line: line, first: t, last: t, at: share, hi: share, fixes: 1}
 }
@@ -375,9 +376,9 @@ func (c *tripCounter) fix(t int64, veh string) {
 	}
 }
 
-// endRun counts run r as cut (CutLow) when it was; next is the vehicle's next fix (0: none) and
-// nextLine its line.
-func (c *tripCounter) endRun(r *cutRun, next int64, nextLine string) {
+// endRun counts run r as cut (CutLow) when it was; next is the vehicle's next matched fix (0:
+// none), turned whether it turned back on the same line there.
+func (c *tripCounter) endRun(r *cutRun, next int64, turned bool) {
 	if r.fixes < 2 || r.at < CutLow || r.hi >= CutHigh || r.first < c.from || r.first >= c.to {
 		return
 	}
@@ -393,7 +394,7 @@ func (c *tripCounter) endRun(r *cutRun, next int64, nextLine string) {
 	switch {
 	case heard == 0 || heard-r.last >= int64(VanishGap/time.Second):
 		n.Vanished++
-	case nextLine == r.line:
+	case turned:
 		n.ShortTurn++
 	}
 }
@@ -495,7 +496,7 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 		}
 	}
 	for _, r := range c.runs {
-		c.endRun(r, 0, "")
+		c.endRun(r, 0, false)
 	}
 	c.runs = map[string]*cutRun{}
 	for id, n := range c.cuts {

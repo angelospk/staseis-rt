@@ -84,6 +84,19 @@ func TestUnmatchedFixesAreNoSilence(t *testing.T) {
 	}
 }
 
+// A bus seen again on the same direction further on, after TripSlack, did not turn back.
+func TestNoShortTurnForwardOnTheSameDirection(t *testing.T) {
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	got := cutsDay(t,
+		vrow(at(8, 0), "L", "a", "G", 200, "g"), vrow(at(8, 10), "L", "a", "G", 2000, "g"),
+		vrow(at(8, 15), "L", "a", "", -1, "g"),
+		vrow(at(8, 45), "L", "a", "G", 2800, "g"), vrow(at(8, 55), "L", "a", "G", 3950, "g"),
+	)
+	if cuts(got["L"]) != [2]int{0, 0} {
+		t.Fatalf("L = %+v", got["L"])
+	}
+}
+
 // A GPS gap shorter than TripSlack, after which the bus goes on along the same run, cuts nothing;
 // neither does a matcher switch between the trips of one daily direction (#131), a run that
 // reaches the last 10% of its shape, nor a run seen at one fix only.
