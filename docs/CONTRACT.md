@@ -14,7 +14,10 @@ Source of truth: `athens-transit-rt/docs/CONTRACT.md`. The frontend keeps a copy
   frontend repo by whoever made it (backend thread opens the copy as a commit or
   issue on the frontend repo).
 
-Revision: 21 (2026-11-07): an OASA Stop (and the `stop` of `/v1/stops/{stop_id}`) gets `code`, the code on the stop sign (GTFS
+Revision: 22 (2026-11-11): `/v1/stops/{stop_id}` gets `warming`, `true` while a line of the stop
+is polled now but has no poll yet (after a restart), so its buses are missing from `arrivals`
+([below](#get-v1stopsstop_id-rev-8));
+rev 21: an OASA Stop (and the `stop` of `/v1/stops/{stop_id}`) gets `code`, the code on the stop sign (GTFS
 `stop_code`, e.g. `040054` for `oasa:40054`); missing when the source has none
 (rev 20: vehicles of `/v1/lines/{line_id}`, `/v1/vehicles` and its `z` 13 tiles
 get `along_m`, their metres along the static shape of their `variant`, and each variant of
@@ -294,6 +297,8 @@ the others keep their usual rate. `stop_id` is the GTFS `stop_id`, as in
       "scheduled": 1793020500, "stops_away": null, "distance_m": null
     }
   ],
+  "usual": [],
+  "warming": false,
   "updated_at": 1793019974
 }
 ```
@@ -326,7 +331,11 @@ the others keep their usual rate. `stop_id` is the GTFS `stop_id`, as in
   [`/v2` Usual](#usual-rev-19-v2stopsid) but with `line` as in `arrivals` (`"608"`). The guard
   of `next_at` uses today's timetable (OASA's daily schedule while the GTFS is expired) even
   when `arrivals` has no `schedule` rows. `[]` while the server has no history.
-- Headers: `Cache-Control: public, max-age=15`. Refetch every 15-30 s while shown.
+- `warming` (rev 22): `true` while a line in `lines` is polled now but has no poll yet (after a
+  restart, or its route codes are not known yet): its buses are missing from `arrivals`, so an
+  empty board does not mean no bus is coming. Then `max-age=5`; refetch in about 5 s.
+  `false` otherwise (a line with no service now is not polled and does not count).
+- Headers: `Cache-Control: public, max-age=15` (`5` while `warming`). Refetch every 15-30 s while shown.
 - `404` `{"error":"unknown_stop"}` (`max-age=60`) for an id not in the current GTFS. `503`
   `{"error":"warming_up"}` before the static GTFS is loaded.
 

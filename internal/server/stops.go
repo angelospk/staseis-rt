@@ -61,11 +61,14 @@ type StopArrival struct {
 }
 
 type StopResponse struct {
-	Stop      StopInfo      `json:"stop"`
-	Lines     []string      `json:"lines"`
-	Arrivals  []StopArrival `json:"arrivals"`
-	Usual     []model.Usual `json:"usual"` // rev 19
-	UpdatedAt int64         `json:"updated_at"`
+	Stop     StopInfo      `json:"stop"`
+	Lines    []string      `json:"lines"`
+	Arrivals []StopArrival `json:"arrivals"`
+	Usual    []model.Usual `json:"usual"` // rev 19
+	// Warming (rev 22): a line of the stop is polled now but has no poll yet (after a restart),
+	// so its buses are missing from arrivals.
+	Warming   bool  `json:"warming"`
+	UpdatedAt int64 `json:"updated_at"`
 }
 
 // stopLines maps each stop to the lines whose trips call there, sorted; built once per feed.
@@ -178,6 +181,9 @@ func (a *App) handleStop(w http.ResponseWriter, r *http.Request) {
 	if lines == nil {
 		lines = []string{}
 	}
+	// Before the board: a first poll published in between then shows its buses with warming
+	// still true (cached 5 s), never an empty board with warming false (cached 15 s).
+	warming := a.boardWarming(wd, lines)
 	arr := a.stopBoard(wd, s, lines, now)
 	// Only the lines with a bus on the way are asked of OASA more often: a big stop has 16 lines.
 	seen := map[string]bool{}
@@ -187,9 +193,28 @@ func (a *App) handleStop(w http.ResponseWriter, r *http.Request) {
 			a.sched.Watch(x.Line)
 		}
 	}
+	ma := stopMaxAge
+	if warming {
+		ma = minMaxAge
+	}
 	st := f.Stops[s]
-	writeJSON(w, http.StatusOK, stopMaxAge, StopResponse{Stop: StopInfo{st.ID, st.Name, st.Lat, st.Lon, st.Code},
-		Lines: lines, Arrivals: arr, Usual: a.usualV1(wd, s, lines, now), UpdatedAt: now.Unix()})
+	writeJSON(w, http.StatusOK, ma, StopResponse{Stop: StopInfo{st.ID, st.Name, st.Lat, st.Lon, st.Code},
+		Lines: lines, Arrivals: arr, Usual: a.usualV1(wd, s, lines, now), Warming: warming, UpdatedAt: now.Unix()})
+}
+
+// boardWarming: a line of the stop has no poll of this feed yet although it is polled now, or
+// its route codes are not known yet (as /v1/lines/{id} answers warming_up).
+func (a *App) boardWarming(w *world, lines []string) bool {
+	for _, l := range lines {
+		_, polled := a.sched.NextUpdate(l)
+		a.mu.RLock()
+		warming, d := a.warming[l], a.lines[l]
+		a.mu.RUnlock()
+		if warming || polled && (d == nil || d.feed != w.feed) {
+			return true
+		}
+	}
+	return false
 }
 
 // boardVehicle is one vehicle of a line's last poll, with its place.
