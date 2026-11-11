@@ -96,7 +96,6 @@ type City struct {
 	mu          sync.Mutex
 	model       *Model
 	live        *liveCity
-	raw         *RawCity
 	health      *LineHealth
 	probes      []string
 	checkProbes map[string][]string // timetable-only line -> its probe stops
@@ -190,10 +189,23 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 	}
 	raw := &RawCity{Lines: *lines, Stops: *stops, Sequences: map[string][]RawSeq{}, Points: map[string][]RawPoints{},
 		Trips: map[string][]RawTripRow{}, BuiltAt: c.unix()}
-	c.mu.Lock()
-	prev := c.raw
-	c.mu.Unlock()
-	if prev == nil {
+	// The last good load is the fallback for a failed answer. It is read from disk only here: kept
+	// in memory, the raw rows of all cities took about 180 MB.
+	// Without a readable file, a city that already has a model keeps it rather than reload with
+	// no fallback; only a first load starts from nothing.
+	prev := &RawCity{}
+	b, err := os.ReadFile(file)
+	if err == nil {
+		err = json.Unmarshal(b, prev)
+	}
+	b = nil
+	if err != nil {
+		c.mu.Lock()
+		installed := c.model != nil
+		c.mu.Unlock()
+		if installed {
+			return fmt.Errorf("static.json for the fallback: %w", err)
+		}
 		prev = &RawCity{}
 	}
 	var (
@@ -290,7 +302,7 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 			raw.Version = prev.version()
 		}
 	}
-	b, err := json.Marshal(raw)
+	b, err = json.Marshal(raw)
 	if err != nil {
 		return err
 	}
@@ -309,7 +321,7 @@ func (c *City) install(raw *RawCity) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	old := c.live
-	c.raw, c.model, c.live = raw, model, newLiveCity(model)
+	c.model, c.live = model, newLiveCity(model)
 	if old != nil {
 		for _, b := range old.Boards {
 			c.live.add(b)
