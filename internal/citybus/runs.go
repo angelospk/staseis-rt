@@ -70,6 +70,9 @@ func timeRun(r *Route, s Sighting) (date string, dep int, ok bool) {
 			if !ok || now-at < -timeEarly || now-at > timeLate {
 				continue
 			}
+			if tripOf(r, d.day, first) != t {
+				return "", 0, false // its departure names another trip: the run would show that one
+			}
 			if n++; n > 1 {
 				return "", 0, false
 			}

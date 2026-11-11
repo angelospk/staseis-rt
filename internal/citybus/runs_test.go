@@ -819,3 +819,35 @@ func TestSchedAt(t *testing.T) {
 		t.Error("a trip with no time")
 	}
 }
+
+// A run is a date and a departure. When another trip leaves at the same time first, the run
+// would name that one, so no run (review of #149).
+func TestTimeRunNotWhenItsDepartureNamesAnotherTrip(t *testing.T) {
+	raw := runRaw(2)
+	// id 5 leaves at 17:20 too, first in the model, but is 20 min slower: not in time at 1361 m.
+	raw.Trips["10"] = append([]RawTripRow{
+		{ID: 5, Day: 2, RouteCode: "10", StopCode: "A", TripTime: "17:20"},
+		{ID: 5, Day: 2, RouteCode: "10", StopCode: "B", TripTime: "17:40"}}, raw.Trips["10"]...)
+	m := buildModel(raw)
+	base, _, _ := dayBase("2026-11-10")
+	if tr := tripOf(m.Routes["10"], 2, t1720); tr == nil || tr.ID != "5" {
+		t.Fatalf("setup: 17:20 names trip 5, got %+v", tr)
+	}
+	if _, _, ok := runOf(m.Routes["10"], devAt(t, m, "25.115", base+t1720+300)); ok {
+		t.Fatal("trip 7 is in time, but its run names trip 5")
+	}
+}
+
+// A run past midnight belongs to yesterday's service day.
+func TestTimeRunPastMidnight(t *testing.T) {
+	raw := lineRaw()
+	for i, c := range []string{"A", "B", "C", "D"} {
+		raw.Trips["10"] = append(raw.Trips["10"], RawTripRow{ID: 3, Day: 2, RouteCode: "10", StopCode: c, TripTime: fmt.Sprintf("24:%02d", 10+2*i)})
+	}
+	m := buildModel(raw)
+	base, _, _ := dayBase("2026-11-10")
+	date, dep, ok := runOf(m.Routes["10"], devAt(t, m, "25.115", base+24*3600+15*60))
+	if !ok || date != "2026-11-10" || dep != 24*3600+10*60 {
+		t.Fatalf("run %s %d %v, want the 24:10 of 2026-11-10", date, dep, ok)
+	}
+}
