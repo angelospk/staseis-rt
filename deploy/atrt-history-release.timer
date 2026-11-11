@@ -4,7 +4,8 @@
 Description=atrt: citybus fix history to GitHub Releases, daily
 
 [Timer]
-OnCalendar=*-*-* 05:30,11:30 Europe/Athens
+OnCalendar=*-*-* 05:30:00 Europe/Athens
+OnCalendar=*-*-* 11:30:00 Europe/Athens
 Persistent=true
 RandomizedDelaySec=5min
 

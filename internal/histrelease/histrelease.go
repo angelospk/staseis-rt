@@ -34,13 +34,9 @@ const (
 func Tag(date string) string   { return "history-citybus-" + date[:7] }
 func Asset(date string) string { return "citybus-history-" + date + ".csv.gz" }
 
-// Days lists the local days that are complete in the history directory: over for stats.Settle,
-// every hour they need gzipped (stats.Inputs), and with a history file older than their start,
-// so a day the history began in, or has partly pruned, is never published.
-func Days(dir string, loc *time.Location, now time.Time) []string {
+// span returns the oldest and newest hour of the history files.
+func span(dir string) (oldest, newest time.Time, hours []time.Time) {
 	entries, _ := os.ReadDir(dir)
-	seen := map[string]bool{}
-	var oldest time.Time
 	for _, e := range entries {
 		hour, _, _ := strings.Cut(e.Name(), ".")
 		t, err := time.Parse(hourLayout, hour)
@@ -50,13 +46,35 @@ func Days(dir string, loc *time.Location, now time.Time) []string {
 		if oldest.IsZero() || t.Before(oldest) {
 			oldest = t
 		}
+		if t.After(newest) {
+			newest = t
+		}
+		hours = append(hours, t)
+	}
+	return oldest, newest, hours
+}
+
+// covered: the history holds a file older than the day's start and one from its end on, so the
+// day is not the first, partial one, not partly pruned (pruning removes the oldest files first),
+// and the writer ran past its end.
+func covered(dir string, start, end time.Time) bool {
+	oldest, newest, _ := span(dir)
+	return !oldest.IsZero() && oldest.Before(start.UTC().Truncate(time.Hour)) && !newest.Before(end.UTC().Truncate(time.Hour))
+}
+
+// Days lists the local days that are complete in the history directory: over for stats.Settle,
+// every hour they need gzipped (stats.Inputs), and covered.
+func Days(dir string, loc *time.Location, now time.Time) []string {
+	_, _, hours := span(dir)
+	seen := map[string]bool{}
+	for _, t := range hours {
 		seen[t.Add(-stats.Late).In(loc).Format(dateLayout)] = true
 		seen[t.Add(time.Hour-time.Second).In(loc).Format(dateLayout)] = true
 	}
 	var days []string
 	for d := range seen {
 		start, end, err := stats.Bounds(d, loc)
-		if err != nil || now.Before(end.Add(stats.Settle)) || !oldest.Before(start.UTC().Truncate(time.Hour)) {
+		if err != nil || now.Before(end.Add(stats.Settle)) || !covered(dir, start, end) {
 			continue
 		}
 		if files, ready, err := stats.Inputs(dir, d, loc); err != nil || !ready || len(files) == 0 {
@@ -95,6 +113,11 @@ func Day(dir, date string, loc *time.Location) (gz []byte, rows int, err error) 
 	}
 	if err := zw.Close(); err != nil {
 		return nil, 0, err
+	}
+	// Checked after the read: had pruning removed one of the day's files before the listing,
+	// the oldest file would now be after the day's start.
+	if !covered(dir, start, end) {
+		return nil, 0, fmt.Errorf("history %s: not fully in the history (pruned?)", date)
 	}
 	return b.Bytes(), rows, nil
 }

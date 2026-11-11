@@ -74,6 +74,8 @@ func historyDir(t *testing.T) string {
 	hourFile(t, dir, "2026-11-12T21", false, row(unix("2026-11-12 23:58"), "c"))
 	// 00:00 Athens on the 13th: a late row of the 12th and the first row of the 13th.
 	hourFile(t, dir, "2026-11-12T22", false, row(unix("2026-11-12 23:59")+50, "late12"), row(unix("2026-11-13 00:05"), "d"))
+	// The 14th starts: the writer ran past the end of the 13th.
+	hourFile(t, dir, "2026-11-13T23", false, row(unix("2026-11-14 01:10"), "f"))
 	return dir
 }
 
@@ -99,6 +101,23 @@ func TestDaysOnlyCompletePastDays(t *testing.T) {
 	}
 	if got := Days(dir, athens, now.Add(-time.Minute)); len(got) != 0 {
 		t.Fatalf("before settle: days %v, want none", got)
+	}
+	// The writer stopped before the day's end: no file from its end on, so not covered.
+	short := t.TempDir()
+	hourFile(t, short, "2026-11-11T10", false, row(unix("2026-11-11 12:10"), "a"))
+	hourFile(t, short, "2026-11-12T20", false, row(unix("2026-11-12 22:10"), "b"))
+	if got := Days(short, athens, now); len(got) != 0 {
+		t.Fatalf("history ends before the day's end: days %v, want none", got)
+	}
+	// Pruned past the day's start: neither listed nor built.
+	pruned := historyDir(t)
+	os.Remove(filepath.Join(pruned, "2026-11-11T10.csv.gz"))
+	os.Remove(filepath.Join(pruned, "2026-11-11T21.csv.gz"))
+	if got := Days(pruned, athens, now); len(got) != 0 {
+		t.Fatalf("pruned: days %v, want none", got)
+	}
+	if _, _, err := Day(pruned, "2026-11-12", athens); err == nil {
+		t.Fatal("pruned: Day must fail")
 	}
 	// An hour of the day still plain (not gzipped): not ready.
 	hourFile(t, dir, "2026-11-12T23", true, row(unix("2026-11-13 01:00"), "e"))
