@@ -246,9 +246,9 @@ func TestComputeCountsTheDailyScheduleRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &Trips{GTFS: "g", GTFSExpired: true, ScheduleSource: SourceMixed, MinCoverage: MinCoverage,
-		TripCount: TripCount{Planned: 3, Run: 1, Partial: 1, Missed: 1},
+		TripCount: TripCount{Planned: 3, Run: 1, Partial: 1, Missed: 1, Vanished: 1},
 		ByLine: []TripLine{
-			{Line: "L", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 2, Run: 1, Missed: 1}, MissedTrips: []string{"go 10:00"}},
+			{Line: "L", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 2, Run: 1, Missed: 1, Vanished: 1}, MissedTrips: []string{"go 10:00"}},
 			{Line: "M", ScheduleSource: SourceGTFS, TripCount: TripCount{Planned: 1, Partial: 1}},
 		}}
 	if !reflect.DeepEqual(d.Trips, want) {
@@ -287,9 +287,9 @@ func TestDailyRunsPairWithBusesInTimeOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &Trips{GTFS: "g", GTFSExpired: true, ScheduleSource: SourceDaily, MinCoverage: MinCoverage,
-		TripCount: TripCount{Planned: 5, Run: 1, Partial: 1, Missed: 1, Unmeasured: 2},
+		TripCount: TripCount{Planned: 5, Run: 1, Partial: 1, Missed: 1, Unmeasured: 2, Vanished: 1},
 		ByLine: []TripLine{
-			{Line: "L", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 4, Run: 1, Partial: 1, Missed: 1, Unmeasured: 1}, MissedTrips: []string{"go 08:20"}},
+			{Line: "L", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 4, Run: 1, Partial: 1, Missed: 1, Unmeasured: 1, Vanished: 1}, MissedTrips: []string{"go 08:20"}},
 			{Line: "N", ScheduleSource: SourceDaily, TripCount: TripCount{Planned: 1, Unmeasured: 1}},
 		}}
 	if !reflect.DeepEqual(d.Trips, want) {
@@ -370,7 +370,8 @@ func TestDailyRunSpansTheTripIdsOfOneBus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 1, Partial: 1}) {
+	// The rows end with the bus 17% along its 09:30 run: vanished.
+	if got := d.Trips.TripCount; got != (TripCount{Planned: 2, Run: 1, Partial: 1, Vanished: 1}) {
 		t.Fatalf("trips = %+v, want the 08:00 run and the 09:30 partial", got)
 	}
 }
@@ -472,7 +473,10 @@ func TestDailyRunSharesAreClampedAndOldRowsDropped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]TripCount{"A": {Planned: 1, Run: 1}, "B": {Planned: 2, Run: 2}, "C": {Planned: 2, Run: 1, Partial: 1}}
+	// A and C's last rows stop mid-route: vanished; B's first bus reached the end before its
+	// fix behind it.
+	want := map[string]TripCount{"A": {Planned: 1, Run: 1, Vanished: 1}, "B": {Planned: 2, Run: 2},
+		"C": {Planned: 2, Run: 1, Partial: 1, Vanished: 1}}
 	for _, l := range d.Trips.ByLine {
 		if l.TripCount != want[l.Line] {
 			t.Errorf("line %s: %+v, want %+v", l.Line, l.TripCount, want[l.Line])

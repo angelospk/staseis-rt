@@ -468,7 +468,8 @@ hour repeated when clocks go back, both hours are summed into one entry.
 | `schedule_source` | where the planned trips come from: `oasa_daily` (OASA's daily schedule of the day), `gtfs`, or `mixed` (some lines each). Missing on days written before 2026-11 (they are `gtfs`) |
 | `min_coverage` | share of a trip's route a vehicle must cover for the trip to count as run (0.5) |
 | `planned`, `run`, `partial`, `missed`, `unmeasured` | trips the day planned, and how they split: covered at least `min_coverage`; seen but covered less; never seen; no usable shape, so not measured (`run + partial + missed + unmeasured = planned`) |
-| `by_line[]` | every line with a planned trip: `line`, `schedule_source` (`oasa_daily` or `gtfs`), the same five counts, `missed_trips` (by start time; `null` when none): GTFS `trip_id`s on a `gtfs` line, and `go HH:MM` / `come HH:MM` (local departure time of OASA's Go or Come run) on an `oasa_daily` line |
+| `short_turn`, `vanished` | bus runs cut short (contract rev 23; missing on days written before it): left mid-route for the other direction or the start; stopped reporting mid-route. Counted next to the planned trips, not part of their sum |
+| `by_line[]` | every line with a planned trip: `line`, `schedule_source` (`oasa_daily` or `gtfs`), the same five counts, `short_turn`, `vanished`, `missed_trips` (by start time; `null` when none): GTFS `trip_id`s on a `gtfs` line, and `go HH:MM` / `come HH:MM` (local departure time of OASA's Go or Come run) on an `oasa_daily` line |
 
 A day plans every trip whose scheduled start falls in it (a trip at 24:10 of Monday's service
 counts for Tuesday). A history row counts for a trip when the matcher assigned the vehicle to
@@ -502,6 +503,22 @@ expired feed and no daily schedule of the line, a line or trip the old timetable
 longer runs counts as missed; with the daily schedule, a late bus can take the run after a
 cancelled one the same way. Rows of
 another GTFS version are ignored; when they are most of the day's rows, `trips` is left out.
+
+Cut runs (`short_turn`, `vanished`) are measured on bus runs, not on planned trips. A bus run is
+a vehicle's consecutive matched rows on one direction of a line: a direction of OASA's daily
+schedule on an `oasa_daily` line, the GTFS `direction_id` on a `gtfs` line (so the matcher moving
+a bus between trips of one direction does not end it). It goes on while each row is less than
+30 min after the previous one and not more than half of the route behind it. A run is cut when it
+has at least 2 rows with a position, starts in the day, ends at 10% of its shape or more, and
+never reached 90%. It is `vanished` when the vehicle's next row (matched or not) comes 15 min or
+more later, or never. It is `short_turn` when that row comes sooner and the vehicle's next matched
+row with a position is on the same line and turned (the other direction, or more than half of the
+route behind on the same one); sooner but on another line, further on along the same direction
+after a 30 min gap, or never matched again, counts as neither. A GPS gap of less than 30 min after
+which the bus goes on along the same run is no cut. Limits: a server outage of 15 min or more
+makes every bus then mid-route `vanished`; a bus that turns back before 10% or after 90% of its
+route, or that drives back to the start of the same direction from less than half of it, is not
+counted; nor is a turn onto a trip that starts on the next day (after midnight).
 
 ### Start delays (`start_delay`)
 

@@ -14,7 +14,10 @@ Source of truth: `athens-transit-rt/docs/CONTRACT.md`. The frontend keeps a copy
   frontend repo by whoever made it (backend thread opens the copy as a commit or
   issue on the frontend repo).
 
-Revision: 22 (2026-11-11): `/v1/stops/{stop_id}` gets `warming`, `true` while a line of the stop
+Revision: 23 (2026-11-11): the `trips` of the daily statistics files (and each of its `by_line[]`)
+get `short_turn` and `vanished`, bus runs cut short mid-route ([API.md](API.md#daily-statistics));
+days written before have neither;
+rev 22: `/v1/stops/{stop_id}` gets `warming`, `true` while a line of the stop
 is polled now but has no poll yet (after a restart), so its buses are missing from `arrivals`
 ([below](#get-v1stopsstop_id-rev-8));
 rev 21: an OASA Stop (and the `stop` of `/v1/stops/{stop_id}`) gets `code`, the code on the stop sign (GTFS

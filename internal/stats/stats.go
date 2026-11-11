@@ -121,7 +121,20 @@ func Inputs(dir, date string, loc *time.Location) (files []string, ready bool, e
 			ready = false
 		}
 	}
-	sort.Strings(files)
+	// hour.csv.gz, then hour.1.csv.gz, hour.2.csv.gz, ...: the order they were written in.
+	order := func(p string) (string, int) {
+		hour, rest, _ := strings.Cut(filepath.Base(p), ".")
+		n, _ := strconv.Atoi(strings.TrimSuffix(rest, ".csv.gz"))
+		return hour, n
+	}
+	sort.Slice(files, func(i, j int) bool {
+		hi, ni := order(files[i])
+		hj, nj := order(files[j])
+		if hi != hj {
+			return hi < hj
+		}
+		return ni < nj
+	})
 	return files, ready, nil
 }
 
@@ -158,6 +171,7 @@ func ComputeFiltered(date string, loc *time.Location, files []string, now time.T
 	delays := newDelayCounter(start.Unix(), end.Unix())
 	if plan != nil {
 		trips = newTripCounter(plan)
+		trips.from, trips.to = start.Unix(), end.Unix()
 	}
 	strs := map[string]string{}
 	for _, file := range files {
@@ -322,6 +336,9 @@ func readFile(path string, from, to int64, recs []rec, strs map[string]string, t
 		g := ""
 		if gtfsCol >= 0 {
 			g = row[gtfsCol]
+		}
+		if trips != nil {
+			trips.fix(t, intern(row[col["veh"]]))
 		}
 		if trips != nil && tripCol >= 0 && row[tripCol] != "" {
 			sm := int64(-1)

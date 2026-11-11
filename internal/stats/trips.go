@@ -3,6 +3,7 @@ package stats
 import (
 	"math"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/angelospk/athens-transit-rt/internal/gtfs"
@@ -25,6 +26,23 @@ const (
 	// RunBack: a bus this share of its route behind its previous fix started a new run (DailyDir).
 	RunBack = 0.5
 
+	// A bus run cut short (staseis-rt#100). A run is a vehicle's consecutive matched fixes on one
+	// direction of a line: a daily direction (DailyDir), else a GTFS line and direction_id; a
+	// matcher switch between the trips of one direction (#131) does not end it. The run goes on
+	// while each fix is less than TripSlack after the previous one and not more than RunBack of
+	// the route behind it. A run with at least 2 measured fixes that starts in the day, ends at a
+	// share of its shape of CutLow or more, and never reached CutHigh was cut:
+	//   - vanished: the vehicle's next fix comes VanishGap or more later, or never. Any row of the
+	//     vehicle is a fix here, matched or not, with a position or not;
+	//   - short-turn: the next fix comes sooner, and the next matched fix with a position is on
+	//     the same line and turned: on the other direction, or more than RunBack of the route
+	//     behind on the same one (back at the start). Sooner but on another line, further on along
+	//     the same direction (after TripSlack), or never matched again counts as neither.
+	// A gap shorter than TripSlack after which the bus goes on along the same run is no cut.
+	CutLow    = 0.1
+	CutHigh   = 0.9
+	VanishGap = 15 * time.Minute
+
 	// The plan a line's trips come from (schedule_source); a day with both is SourceMixed.
 	SourceDaily     = "oasa_daily"
 	SourceGTFS      = "gtfs"
@@ -41,6 +59,7 @@ type PlanTrip struct {
 	End   int64   `json:"end"`
 	FromM float64 `json:"from_m"`
 	ToM   float64 `json:"to_m"`
+	Dir   int     `json:"dir,omitempty"` // GTFS direction_id (0 or 1)
 }
 
 // Plan is the schedule of one local day, from the GTFS feed version GTFS: the GTFS trips, and
@@ -116,6 +135,9 @@ type TripCount struct {
 	Partial    int `json:"partial"`    // seen, but covering less
 	Missed     int `json:"missed"`     // no fix at all
 	Unmeasured int `json:"unmeasured"` // no usable shape to measure against
+	// Bus runs cut short (CutLow): next to the planned trips, not part of their sum.
+	ShortTurn int `json:"short_turn"`
+	Vanished  int `json:"vanished"`
 }
 
 type TripLine struct {
@@ -161,7 +183,7 @@ func NewPlan(f *gtfs.Feed, version, date string, loc *time.Location) (*Plan, err
 				continue
 			}
 			pt := PlanTrip{ID: t.ID, Line: f.Line(t), Start: s.Unix(),
-				End: sd.Add(time.Duration(f.End(t)) * time.Second).Unix()}
+				End: sd.Add(time.Duration(f.End(t)) * time.Second).Unix(), Dir: int(t.Dir)}
 			sp := SpanOf(m, t)
 			pt.FromM, pt.ToM = sp.FromM, sp.ToM
 			p.Trips = append(p.Trips, pt)
@@ -183,10 +205,22 @@ type tripCounter struct {
 	plan          *Plan
 	byID          map[string][]int
 	state         []tripSeen
-	dailyOf       map[string]int     // GTFS trip id -> index in plan.Daily (the first direction with it)
-	cur           map[busKey]*busRun // the latest bus run of each vehicle on a daily direction
-	buses         []*busRun          // all bus runs on the daily directions
-	stamped, ours int                // rows of the day with a feed version, and those of the plan's
+	dailyOf       map[string]int        // GTFS trip id -> index in plan.Daily (the first direction with it)
+	cur           map[busKey]*busRun    // the latest bus run of each vehicle on a daily direction
+	buses         []*busRun             // all bus runs on the daily directions
+	stamped, ours int                   // rows of the day with a feed version, and those of the plan's
+	from, to      int64                 // the day (unix s): runs that start in it are counted
+	runs          map[string]*cutRun    // the latest run of each vehicle (CutLow)
+	cuts          map[string]*TripCount // ShortTurn and Vanished per line
+}
+
+// cutRun is a vehicle's run along one direction of a line (CutLow).
+type cutRun struct {
+	key, line   string
+	first, last int64
+	after       int64   // the vehicle's first row after last, matched or not (0: none yet)
+	at, hi      float64 // share of the shape at the last fix, and the most it reached
+	fixes       int
 }
 
 type tripSeen struct {
@@ -222,7 +256,8 @@ func (b *busRun) left() int64 {
 
 func newTripCounter(plan *Plan) *tripCounter {
 	c := &tripCounter{plan: plan, byID: map[string][]int{}, state: make([]tripSeen, len(plan.Trips)),
-		dailyOf: map[string]int{}, cur: map[busKey]*busRun{}}
+		dailyOf: map[string]int{}, cur: map[busKey]*busRun{}, runs: map[string]*cutRun{},
+		cuts: map[string]*TripCount{}}
 	for i, pt := range plan.Trips {
 		c.byID[pt.ID] = append(c.byID[pt.ID], i)
 	}
@@ -257,6 +292,7 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 	if gtfsVer != c.plan.GTFS {
 		return
 	}
+	c.cut(t, veh, trip, sm)
 	slack := int64(TripSlack / time.Second)
 	for _, k := range c.byID[trip] {
 		pt := &c.plan.Trips[k]
@@ -298,6 +334,75 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 			b.span = Span{0, 1}
 		}
 		b.seen.note(share, b.span)
+	}
+}
+
+// cutKey is the direction of a line trip runs on, its line and its span; ok is false for a trip
+// of no plan, without a usable span, or in two daily directions (a loop).
+func (c *tripCounter) cutKey(trip string) (key, line string, sp Span, ok bool) {
+	if d, in := c.dailyOf[trip]; in {
+		if d < 0 {
+			return "", "", Span{}, false
+		}
+		key, line, sp = "d"+strconv.Itoa(d), c.plan.Daily[d].Line, c.plan.Daily[d].Trips[trip]
+	} else if ks := c.byID[trip]; len(ks) > 0 {
+		pt := c.plan.Trips[ks[0]]
+		key, line, sp = "g"+strconv.Itoa(pt.Dir)+"/"+pt.Line, pt.Line, Span{pt.FromM, pt.ToM}
+	} else {
+		return "", "", Span{}, false
+	}
+	return key, line, sp, sp.ToM > sp.FromM
+}
+
+// cut follows vehicle veh's runs (CutLow) with its fix at time t on trip, sm metres along it.
+func (c *tripCounter) cut(t int64, veh, trip string, sm float64) {
+	key, line, sp, ok := c.cutKey(trip)
+	if !ok || sm < 0 {
+		return
+	}
+	share := min(max((sm-sp.FromM)/(sp.ToM-sp.FromM), 0), 1)
+	r := c.runs[veh]
+	if r != nil && t <= r.last {
+		return // a copy of an older row (history writes each vehicle in time order)
+	}
+	if r != nil && r.key == key && t-r.last < int64(TripSlack/time.Second) && share >= r.at-RunBack {
+		r.last, r.at, r.hi, r.after = t, share, max(r.hi, share), 0
+		r.fixes++
+		return
+	}
+	if r != nil {
+		c.endRun(r, t, line == r.line && (key != r.key || share < r.at-RunBack))
+	}
+	c.runs[veh] = &cutRun{key: key, line: line, first: t, last: t, at: share, hi: share, fixes: 1}
+}
+
+// fix notes a row of vehicle veh at time t, matched or not: it was not silent (CutLow).
+func (c *tripCounter) fix(t int64, veh string) {
+	if r := c.runs[veh]; r != nil && t > r.last && r.after == 0 {
+		r.after = t
+	}
+}
+
+// endRun counts run r as cut (CutLow) when it was; next is the vehicle's next matched fix (0:
+// none), turned whether it turned back on the same line there.
+func (c *tripCounter) endRun(r *cutRun, next int64, turned bool) {
+	if r.fixes < 2 || r.at < CutLow || r.hi >= CutHigh || r.first < c.from || r.first >= c.to {
+		return
+	}
+	n := c.cuts[r.line]
+	if n == nil {
+		n = &TripCount{}
+		c.cuts[r.line] = n
+	}
+	heard := next
+	if r.after != 0 {
+		heard = r.after
+	}
+	switch {
+	case heard == 0 || heard-r.last >= int64(VanishGap/time.Second):
+		n.Vanished++
+	case turned:
+		n.ShortTurn++
 	}
 }
 
@@ -397,6 +502,16 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 			l.count(s, sp, name+time.Unix(start, 0).In(loc).Format("15:04"))
 		}
 	}
+	for _, r := range c.runs {
+		c.endRun(r, 0, false)
+	}
+	c.runs = map[string]*cutRun{}
+	for id, n := range c.cuts {
+		if l := lines[id]; l != nil { // a line of no planned trip has no row
+			l.ShortTurn += n.ShortTurn
+			l.Vanished += n.Vanished
+		}
+	}
 	out.ByLine = make([]TripLine, 0, len(lines))
 	sources := map[string]bool{}
 	for _, l := range lines {
@@ -405,6 +520,8 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 		out.Partial += l.Partial
 		out.Missed += l.Missed
 		out.Unmeasured += l.Unmeasured
+		out.ShortTurn += l.ShortTurn
+		out.Vanished += l.Vanished
 		out.ByLine = append(out.ByLine, *l)
 		sources[l.ScheduleSource] = true
 	}
