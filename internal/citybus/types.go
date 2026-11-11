@@ -208,6 +208,9 @@ type Sighting struct {
 	Speed  *float64
 	Since  int64   // unix s the bus was first seen at this point (within standStill); 0 is Seen
 	SinceM float64 // the metre of that first sighting: standing is measured from it
+	// Against: every pass of its route is behind its last sighting: citybus.gr lists it on a run
+	// it no longer drives. Shown at its GPS point, with no estimate, hold or path (#147).
+	Against bool
 }
 
 // Placed is where a bus is at a given time.

@@ -997,3 +997,69 @@ func TestLiveCityRepeatedPlacedFollowsMapAt(t *testing.T) {
 		prev = p.M
 	}
 }
+
+// On a street driven out and back, a bus seen on the way back stays on the way back: the next
+// board picks the pass that goes on from the last sighting, not the one its minutes fit best (#147).
+func TestLiveCityKeepsTheLegOnAnOutAndBackStreet(t *testing.T) {
+	m := buildModel(loopRaw()) // A 0, B 908, C 1815, B 2723, A 3630
+	l := newLiveCity(m)
+	r := func(stop string, at int64, lon float64, mins, secs int) Board {
+		return Board{Stop: stop, At: at, Rows: []LiveRow{{LineCode: "L", RouteCode: "90", Latitude: 35.3, Longitude: Num(lon), DepartureMins: Num(mins), DepartureSeconds: Num(secs), VehicleCode: "v"}}}
+	}
+	l.add(r("A", 1000, 25.117, 4, 17)) // 1543 m to A on the way back: the way back (~2087 m)
+	if m := l.Buses["v"].M; m < 2000 {
+		t.Fatalf("first sighting on the way back: %.0f", m)
+	}
+	l.add(r("B", 1010, 25.115, 3, 47)) // 3:47 fits B from the way out (1362 m), but the bus is on the way back
+	if s := l.Buses["v"]; s.M < 2200 || s.Against {
+		t.Fatalf("the way back goes on at ~2269 m: %.0f against %v", s.M, s.Against)
+	}
+}
+
+// A bus whose sightings go back along its route is not on it (citybus.gr lists it on its last run
+// while it drives the way back): it is shown at its GPS point, with no estimate, hold or path (#147).
+func TestLiveCityBusGoingAgainstItsRoute(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.118", 2, "v")}}) // ~1634 m
+	l.placed(1008, "")
+	l.add(Board{Stop: "D", At: 1010, Rows: []LiveRow{row("10", "35.3", "25.116", 2, "v")}}) // ~1452 m: 182 m back
+	s := l.Buses["v"]
+	if !s.Against || s.Speed != nil {
+		t.Fatalf("182 m back along the route is against it: against %v speed %v", s.Against, s.Speed)
+	}
+	p := l.placed(1015, "")[0]
+	if math.Abs(p.M-s.M) > 1 || p.Kind != "gps" || p.Bearing != nil {
+		t.Fatalf("shown at its GPS point, no bearing: %+v", p)
+	}
+	if mo := motion(&p); mo.Path != nil || mo.Speed != nil {
+		t.Fatalf("no path to drive along: %+v", mo)
+	}
+}
+
+// GPS noise and a new trip from the start of the route are not against it (#147).
+func TestLiveCityNotAgainstForNoiseOrANewTrip(t *testing.T) {
+	m := buildModel(lineRaw())
+	for _, c := range []struct {
+		lon  string
+		what string
+	}{{"25.1178", "18 m back is noise"}, {"25.1005", "45 m from the start is a new trip"}} {
+		l := newLiveCity(m)
+		l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.118", 2, "v")}})
+		l.add(Board{Stop: "D", At: 1010, Rows: []LiveRow{row("10", "35.3", c.lon, 2, "v")}})
+		if l.Buses["v"].Against {
+			t.Fatalf("%s", c.what)
+		}
+	}
+}
+
+// A bus against its route gives no estimated arrivals at the stops of that route (#147).
+func TestEstimatesSkipABusAgainstItsRoute(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.118", 2, "v")}}) // ~1634 m
+	l.add(Board{Stop: "D", At: 1010, Rows: []LiveRow{row("10", "35.3", "25.116", 2, "v")}}) // ~1452 m, against
+	if a := estimates("C", l.placed(1010, ""), 1010); len(a) != 0 {
+		t.Fatalf("C is not ahead of a bus going the other way: %+v", a)
+	}
+}

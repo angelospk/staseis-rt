@@ -17,6 +17,20 @@ const MaxAge = 120
 
 // sightings turns one board into sightings (pure). A bus off its route's shape (> 300 m) is skipped.
 func sightings(m *Model, b Board) []Sighting {
+	return sightingsAfter(m, b, nil)
+}
+
+// againstSlack is how far behind its last sighting a bus may be seen (GPS noise, m); newTripM is
+// how near the start of its route a sighting behind is a new trip, not a bus going against it.
+const (
+	againstSlack = 30
+	newTripM     = 300
+)
+
+// sightingsAfter is sightings, with the last sighting of each bus (prev, by id): on a street the
+// route drives out and back, the pass that goes on from there wins over the pass its minutes fit
+// best, and a bus with every pass behind it is going against its route (#147).
+func sightingsAfter(m *Model, b Board, prev map[string]Sighting) []Sighting {
 	out := []Sighting{}
 	for _, r := range b.Rows {
 		route := m.Routes[r.RouteCode]
@@ -30,6 +44,16 @@ func sightings(m *Model, b Board) []Sighting {
 		t := float64(r.DepartureMins)*60 + float64(r.DepartureSeconds)
 		p := proj{M: 0, Off: math.Inf(1)}
 		idx, fit := -1, math.Inf(1)
+		// With a last sighting on this route, only passes from there on to as far as the bus can
+		// have gone (15 m/s) count first.
+		old, seen := prev[r.VehicleCode]
+		seen = seen && old.Route == r.RouteCode && b.At >= old.Seen
+		lo, hi := math.Inf(-1), math.Inf(1)
+		if seen {
+			lo, hi = old.M-againstSlack, old.M+15*math.Max(float64(b.At-old.Seen), 10)+100
+		}
+		wp, widx, wfit := proj{}, -1, math.Inf(1)
+		ahead := false
 		for _, c := range candidates(route.Shape, route.Cum, LL{lat, lon}, 30) {
 			if c.Off > 300 {
 				continue
@@ -48,20 +72,28 @@ func sightings(m *Model, b Board) []Sighting {
 			if f < fit {
 				fit, p, idx = f, c, i
 			}
+			ahead = ahead || c.M >= lo
+			if c.M >= lo && c.M <= hi && f < wfit {
+				wfit, wp, widx = f, c, i
+			}
 		}
 		if idx < 0 {
 			continue
 		}
+		if widx >= 0 {
+			p, idx = wp, widx
+		}
+		against := seen && !ahead && p.M > newTripM
 		toM := route.StopM[idx]
 		eta := b.At + int64(t)
 		left := math.Max(0, toM-p.M)
 		var speed *float64
-		if t > 30 && left > 100 {
+		if t > 30 && left > 100 && !against {
 			v := math.Min(15, math.Max(2, left/t))
 			speed = &v
 		}
 		out = append(out, Sighting{ID: r.VehicleCode, Route: r.RouteCode, Lat: lat, Lon: lon, Seen: b.At,
-			M: math.Min(p.M, toM), ToStop: b.Stop, ToM: toM, ETA: eta, Speed: speed})
+			M: math.Min(p.M, toM), ToStop: b.Stop, ToM: toM, ETA: eta, Speed: speed, Against: against})
 	}
 	return out
 }
@@ -121,7 +153,7 @@ func placeFrom(mo *Model, s Sighting, now int64, floor float64) *Placed {
 	}
 	ahead := pointAt(route.Shape, route.Cum, math.Min(route.Cum[len(route.Cum)-1], m+40))
 	var brg *float64
-	if dist(LL{lat, lon}, ahead) > 5 {
+	if dist(LL{lat, lon}, ahead) > 5 && !s.Against { // against its route: the route's way is not its own
 		v := bearing(LL{lat, lon}, ahead)
 		brg = &v
 	}
@@ -195,7 +227,7 @@ func motion(p *Placed) Motion {
 	end := math.Min(r.Cum[len(r.Cum)-1], p.S.ToM) // never past the stop the bus was due at
 	// nor past where the map waits for it (#145): a client driving on would be pulled back.
 	end = math.Min(end, p.WaitM)
-	if end-p.M < 5 {
+	if end-p.M < 5 || p.S.Against { // a bus against its route has no path on it (#147)
 		return Motion{}
 	}
 	pathEnd := math.Min(end, p.M+1500)
@@ -254,7 +286,7 @@ const (
 
 func (l *liveCity) add(b Board) []Sighting {
 	l.Boards[b.Stop] = b
-	found := sightings(l.model, b)
+	found := sightingsAfter(l.model, b, l.Buses)
 	for _, s := range found {
 		old, ok := l.Buses[s.ID]
 		// Newer wins; at the same time, the board of the nearer stop (its minutes are surer).
@@ -302,7 +334,7 @@ func (l *liveCity) placed(now int64, line string) []Placed {
 		floor := -1.0
 		// A bus is held at the last point shown, standing or moving, so it never goes back (#145).
 		// Never past the stop the newest board says it is still due at.
-		if last, ok := l.shown[id]; ok && last.route == s.Route {
+		if last, ok := l.shown[id]; ok && last.route == s.Route && !s.Against {
 			floor = last.m
 			// The client drove the dot on from there at the bus's speed: so does the hold, up to
 			// where the map waits, or a new board with the same GPS point would put it back. Only
@@ -442,6 +474,9 @@ func estimates(stop string, placed []Placed, now int64) []Arrival {
 	out := []Arrival{}
 	for i := range placed {
 		p := &placed[i]
+		if p.S.Against { // the stops of its route are not ahead of it (#147)
+			continue
+		}
 		r := p.Route
 		for k, c := range r.Stops {
 			if c != stop || k >= len(r.Stops)-1 || r.StopM[k] <= p.EstM+15 {
