@@ -109,3 +109,29 @@ func TestFinishNeedsToBeAtTheLastStop(t *testing.T) {
 		t.Fatalf("at the terminus: %q, want T01 (the fix beside it was not an arrival)", tripID(m, r))
 	}
 }
+
+// A bus can finish its trip up to 10 minutes early (MinDelay), but the trip stays a candidate
+// until CandidateAfter past its scheduled end. The finished mark must last that long, not just an
+// hour after the arrival.
+func TestEarlyFinishOutlivesCandidateWindow(t *testing.T) {
+	m := newMatcher(t, Memory)
+	for _, s := range []struct {
+		p    float64
+		h, n int
+	}{{1.0, 10, 0}, {2.0, 10, 5}, {3.0, 10, 10}, {3.97, 10, 12}} { // T00 ends at 10:20
+		if r := m.MatchLine("L", []Obs{obs("v", s.p, at(s.h, s.n, 0))})[0]; tripID(m, r) != "T00" {
+			t.Fatalf("setup at %02d:%02d: %q", s.h, s.n, tripID(m, r))
+		}
+	}
+	if len(m.finished["v"]) != 1 {
+		t.Fatalf("finished: %v", m.finished["v"])
+	}
+	m.Forget(at(11, 15, 0)) // 63 min after the arrival, 55 min after the scheduled end
+	if len(m.finished["v"]) != 1 {
+		t.Fatal("finished mark dropped while T00 is still a candidate")
+	}
+	m.Forget(at(11, 21, 0))
+	if len(m.finished["v"]) != 0 {
+		t.Fatal("finished mark kept after the candidate window")
+	}
+}

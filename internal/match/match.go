@@ -160,7 +160,7 @@ type Matcher struct {
 	shapeLines map[int32]*geo.Polyline
 	tracks     map[string]*track
 	commits    map[string]*commit
-	finished   map[string]map[tripDay]time.Time // vehicle -> trips it reached the end of
+	finished   map[string]map[tripDay]time.Time // vehicle -> trips it reached the end of -> when the mark expires
 }
 
 // commit is the trip a vehicle has held over its last fixes (memory matcher only). Once
@@ -365,7 +365,12 @@ func (m *Matcher) updateCommits(results []Result) {
 			if m.finished[r.VehicleID] == nil {
 				m.finished[r.VehicleID] = map[tripDay]time.Time{}
 			}
-			m.finished[r.VehicleID][td] = r.Time
+			// Keep the mark while the trip can still be a candidate: a bus can arrive early.
+			end := r.Day.Add(time.Duration(m.Feed.StopTime(t, m.Feed.NumStops(t)-1).Arr+CandidateAfter) * time.Second)
+			if until := r.Time.Add(forgetAfter); until.After(end) {
+				end = until
+			}
+			m.finished[r.VehicleID][td] = end
 			delete(m.commits, r.VehicleID)
 		}
 	}
@@ -389,8 +394,8 @@ func (m *Matcher) Forget(now time.Time) {
 		}
 	}
 	for id, done := range m.finished {
-		for td, at := range done {
-			if now.Sub(at) > forgetAfter {
+		for td, until := range done {
+			if now.After(until) {
 				delete(done, td)
 			}
 		}
