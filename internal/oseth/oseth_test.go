@@ -61,6 +61,22 @@ func TestRouteVehiclesErrorBody(t *testing.T) {
 	}
 }
 
+// TM100002 means OSETH has no trip for this route and shape right now: no vehicles, not a failure (#123).
+func TestRouteVehiclesNoTripIsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":"","error":"Client error: ` + "`GET https://example/route/57_6805_2_3/info`" + ` resulted in a ` + "`400 Bad Request`" + ` response:\n{\"message\":\"Entity not found: There is not trip for the given route id and shape id.\",\"code\":\"TM100002\"}","status_code":500}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, 100)
+	vs, err := c.RouteVehicles(context.Background(), "57_6805_2_3", "6059")
+	if err != nil || len(vs) != 0 {
+		t.Fatalf("got %d vehicles, err %v; want 0 and nil", len(vs), err)
+	}
+	if c.Errors() != 0 || c.LastError() != "" {
+		t.Fatalf("errors %d, last error %q; want none counted", c.Errors(), c.LastError())
+	}
+}
+
 var t0 = time.Date(2026, 11, 6, 8, 0, 0, 0, time.UTC)
 
 func obs(id string, lat, lon float64, at time.Time) match.Obs {

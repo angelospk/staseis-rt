@@ -173,6 +173,10 @@ func (c *Client) routeVehicles(ctx context.Context, routeID, shapeID string) ([]
 		return nil, fmt.Errorf("route %s: %w", routeID, err)
 	}
 	if ri.StatusCode != http.StatusOK {
+		// TM100002: no trip for this route and shape now. A normal empty answer, not a failure (#123).
+		if strings.Contains(ri.Error, `"TM100002"`) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("route %s: status %d %s", routeID, ri.StatusCode, ri.Error)
 	}
 	data := bytes.TrimSpace(ri.Data)
