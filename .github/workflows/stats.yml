@@ -34,6 +34,10 @@ jobs:
       # on 2026-11-06 at 23:22 Athens, so 2026-11-06 is a partial day.
       API_THESSALONIKI: ${{ vars.STATS_API_THESSALONIKI || 'https://transit-thess.haroldpoi.dev' }}
       FIRST_DAY_THESSALONIKI: "2026-11-07"
+      # The citybus.gr cities (#151): one server, a folder per city under v1/<slug>/. History
+      # started on 2026-11-11 at 11:15 Athens, so 2026-11-11 is a partial day.
+      API_CITYBUS: ${{ vars.STATS_API_CITYBUS || 'https://staseis-rt.haroldpoi.dev' }}
+      FIRST_DAY_CITYBUS: "2026-11-12"
     steps:
       - name: Check out the stats branch (or start it)
         run: |
@@ -86,6 +90,25 @@ jobs:
           # Thessaloniki has its own server; an outage there must not block the Athens days.
           publish "$API_THESSALONIKI" v1/thessaloniki "$FIRST_DAY_THESSALONIKI" ||
             echo "::warning::Thessaloniki stats skipped"
+          # citybus.gr: every city of /v1/cities; v1/cities.json lists them with their newest day
+          # ("" for a city with no live bus yet, e.g. one with a timetable only).
+          if curl -fsS --retry 3 --max-time 30 "$API_CITYBUS/v1/cities" -o ../cities.json &&
+             jq -e '.cities | type == "array"' ../cities.json >/dev/null; then
+            echo '[]' > ../list.json
+            for row in $(jq -r '.cities[] | "\(.id),\(.slug)"' ../cities.json); do
+              id=${row%,*} slug=${row#*,}
+              [[ "$id" =~ ^[a-z]+$ && "$slug" =~ ^[a-z]+$ ]] || { echo "::warning::bad city $row"; continue; }
+              publish "$API_CITYBUS/$id" "v1/$slug" "$FIRST_DAY_CITYBUS" || echo "::warning::$slug stats skipped"
+              latest=$(jq -r '.latest // ""' "v1/$slug/index.json" 2>/dev/null || echo "")
+              jq --arg id "$id" --arg slug "$slug" --arg latest "$latest" \
+                --arg name "$(jq -r --arg id "$id" '.cities[] | select(.id == $id) | .name' ../cities.json)" \
+                '. + [{id: $id, slug: $slug, name: $name, latest: $latest}]' ../list.json > ../list.tmp
+              mv ../list.tmp ../list.json
+            done
+            jq -c '{version: 1, cities: .}' ../list.json > v1/cities.json
+          else
+            echo "::warning::citybus stats skipped: no city list"
+          fi
       - name: Write README
         working-directory: pub
         run: |
@@ -104,6 +127,11 @@ jobs:
           - `v1/days/YYYY-MM-DD.json`: one day
           - `v1/thessaloniki/`: the same files for the OASTH buses of Thessaloniki, from
             2026-11-07 (no `start_delay`: it comes from OASA's daily schedule)
+          - `v1/<city>/`: the same files for each citybus.gr city, from 2026-11-12, listed in
+            `v1/cities.json`. Buses come from stop boards, so there are no delays; speeds use
+            only fixes that moved, and `trips` counts runs of the citybus.gr timetable
+            (`schedule_source: citybus_timetable`): a bus without a vehicle code is matched to
+            a run about 3 times in 4, so `missed` is an upper bound.
 
           Speed (km/h) = `dist_m / time_s * 3.6`. Fields and method: `docs/API.md` on `main`.
           Raw URL: `https://raw.githubusercontent.com/angelospk/staseis-rt/stats/v1/latest.json`

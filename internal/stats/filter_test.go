@@ -81,11 +81,12 @@ func TestRunFilteredWritesOnlyDaysOfTheCity(t *testing.T) {
 	if len(idx.Days) != 0 {
 		t.Fatalf("index %+v", idx)
 	}
-	days, err = RunFiltered(hist, out, athens, now, false, nil, Filter{Prefix: "pat:"})
+	pat := t.TempDir() // every city has its own folder
+	days, err = RunFiltered(hist, pat, athens, now, false, nil, Filter{Prefix: "pat:"})
 	if err != nil || len(days) != 1 || days[0] != "2026-11-12" {
 		t.Fatalf("days %v, %v", days, err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "days", "2026-11-12.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(pat, "days", "2026-11-12.json")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -116,5 +117,37 @@ func TestTripsOfOneCityIgnoreOtherCitiesRows(t *testing.T) {
 	}
 	if d.Trips.ScheduleSource != SourceTimetable || len(d.Trips.ByLine) != 1 || d.Trips.ByLine[0].ScheduleSource != SourceTimetable {
 		t.Fatalf("schedule source %q, by line %+v", d.Trips.ScheduleSource, d.Trips.ByLine)
+	}
+}
+
+// A city with no row in a day (a timetable-only city) writes no day file; a marker keeps the
+// hourly run from reading that day's files again (28 cities share them).
+func TestRunFilteredMarksAnEmptyDayOnce(t *testing.T) {
+	hist, out := t.TempDir(), t.TempDir()
+	at := local(2026, 11, 12, 10, 0, 0)
+	writeHour(t, hist, hourName(at), ".csv.gz", fix{at, "pat:1", "pat:a", 38.2, 21.7})
+	now := local(2026, 11, 13, 6, 0, 0)
+	f := Filter{Prefix: "cfu:"}
+	if _, err := RunFiltered(hist, out, athens, now, false, nil, f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "days", "2026-11-12.none")); err != nil {
+		t.Fatal("no marker for the empty day:", err)
+	}
+	// The day is not read again: a broken file now would fail a run that read it.
+	if err := os.WriteFile(filepath.Join(hist, hourName(at)+".csv.gz"), []byte("not gzip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if days, err := RunFiltered(hist, out, athens, now, false, nil, f); err != nil || len(days) != 0 {
+		t.Fatalf("the empty day was read again: %v, %v", days, err)
+	}
+	var idx Index
+	readJSON(t, filepath.Join(out, "index.json"), &idx)
+	if len(idx.Days) != 0 {
+		t.Fatalf("index %+v", idx)
+	}
+	// Athens (no prefix) keeps its old way: no marker.
+	if _, err := Run(hist, t.TempDir(), athens, now, false, nil); err == nil {
+		t.Fatal("Run without a filter must still read the day")
 	}
 }
