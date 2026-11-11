@@ -34,27 +34,34 @@ func runCode(code string) (date string, dep int, ok bool) {
 	return date, h*3600 + mi*60, true
 }
 
-// runOf: the run of a sighting. The code names it; a device id gets it from the timetable only
-// when that is sure (timeRun).
+// runOf: the run of a sighting. The code names it; a device id carries the run the live city
+// gave it from the timetable (liveCity.devRun).
 func runOf(r *Route, s Sighting) (date string, dep int, ok bool) {
 	if date, dep, ok = runCode(s.ID); ok {
 		return date, dep, true
 	}
-	return timeRun(r, s)
+	return s.RunDate, s.RunDep, s.RunDate != ""
 }
 
 // Time match of a device-id bus (#149): of the trips of yesterday's and today's service day, the
 // one whose time where the bus is lies from timeEarly before to timeLate after now. Only a bus
 // timeFromM along its route counts (one at the start can wait there for any run), and only one
-// trip may match. Measured on coded buses (2026-11-11, 1021 rows of 28 cities): 74% matched,
-// 98% of them right.
+// trip may match. A run another bus of the route is on (held, by runKey) is no candidate, and a
+// bus keeps its run while it goes on (#155, liveCity.devRun).
+//
+// Measured on coded buses with their own code hidden (2026-11-11, 28 cities, 60 min, 6247
+// sightings of runs in the timetable): time match alone 67.4% matched, 93.3% right; with held
+// runs left out and the run kept 67.7% matched, 96.9% right. Most wrong ones are codes that
+// disagree with the timetable (Kavala's runs 9-21 min before their code); without Kavala 67.4% /
+// 96.4% before, 69.2% / 98.2% now. Tried and left out: the departure past timeFromM naming the
+// trip (+0.3 points matched), a late window from the headway (fewer right).
 const (
 	timeEarly = 180
 	timeLate  = 600
 	timeFromM = 300
 )
 
-func timeRun(r *Route, s Sighting) (date string, dep int, ok bool) {
+func timeRun(r *Route, s Sighting, held map[string]bool) (date string, dep int, ok bool) {
 	if r == nil || s.Against || s.M < timeFromM {
 		return "", 0, false
 	}
@@ -69,6 +76,9 @@ func timeRun(r *Route, s Sighting) (date string, dep int, ok bool) {
 			at, first, ok := schedAt(r, t, s.M)
 			if !ok || now-at < -timeEarly || now-at > timeLate {
 				continue
+			}
+			if held[runKey(d.date, s.Route, first)] {
+				continue // another bus is on it
 			}
 			if tripOf(r, d.day, first) != t {
 				return "", 0, false // its departure names another trip: the run would show that one

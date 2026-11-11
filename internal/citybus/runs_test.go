@@ -462,11 +462,19 @@ func TestVehicleCarriesItsRun(t *testing.T) {
 	if v := by2["t:"+extra]; v["run"] != nil {
 		t.Fatalf("v2 extra: %v", v["run"])
 	}
-	// A device id gets its run from the timetable: the 17:20 is due where it is now (#149).
-	if v := by1[dev]; v["trip_id"] != "7" || v["trip_label"] != "17:20 SA → SD" {
+	// A device id where the 17:20 is due: the coded bus is on the 17:20, so no run (#155).
+	if v := by1[dev]; v["trip_id"] != nil {
+		t.Fatalf("a device id on a held run: %v", v["trip_id"])
+	}
+	// Alone, a device id gets its run from the timetable: the 17:20 is due where it is now (#149).
+	c, s, today, _, _ = runCity(t, t.TempDir(), nil)
+	boardWith(t, c, [2]string{dev, "25.128"})
+	_, v1 = getBody(t, s, "/t/v1/lines/1")
+	_, v2 = getBody(t, s, "/t/v2/lines/t:1/vehicles")
+	if v := v1["vehicles"].([]any)[0].(map[string]any); v["trip_id"] != "7" || v["trip_label"] != "17:20 SA → SD" {
 		t.Fatalf("a device id in time: %v %v", v["trip_id"], v["trip_label"])
 	}
-	if v := by2["t:"+dev]; v["run"] != "t:run:7:"+today {
+	if v := v2["vehicles"].([]any)[0].(map[string]any); v["run"] != "t:run:7:"+today {
 		t.Fatalf("v2 device: %v", v["run"])
 	}
 }
@@ -571,7 +579,7 @@ func TestHistoryOneRowPerMoveOrMinute(t *testing.T) {
 	// fix_t,line,route_code,veh,lat,lon,gtfs,trip_id,shape_id,s_m,delay_s,run_start,start_delay_s
 	want := map[string]bool{
 		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25115000,%s,7,,%d,,,", t0, run, ver, m115):    true,
-		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25128000,%s,7,,%d,,,", t0, dev, ver, m128):    true, // run by time (#149)
+		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25128000,%s,,,%d,,,", t0, dev, ver, m128):     true, // the 17:20 is the coded bus's (#155)
 		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25115000,%s,7,,%d,,,", t0+60, run, ver, m115): true,
 		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25116000,%s,7,,%d,,,", t0+70, run, ver, m116): true,
 	}
@@ -738,10 +746,29 @@ func TestNoteSkipsABusAgainstItsRoute(t *testing.T) {
 
 const devID = "1607650707510153454"
 
-// devAt: the sighting of a device-id bus of route 10 at lon, on the board of D at unix at.
+// devAt: the sighting of a device-id bus of route 10 at lon, on the board of D at unix at, as a
+// city with no other bus reads it (its run from the timetable set).
 func devAt(t *testing.T, m *Model, lon string, at int64) Sighting {
 	t.Helper()
-	return seenAt(t, m, devID, lon, at)
+	return liveAt(t, newLiveCity(m), at, [2]string{devID, lon})[devID]
+}
+
+// liveAt: the city reads stop D's board at unix at with these buses (code, lon) of route 10; the
+// sightings it found, by bus.
+func liveAt(t *testing.T, l *liveCity, at int64, buses ...[2]string) map[string]Sighting {
+	t.Helper()
+	var rows []LiveRow
+	for _, b := range buses {
+		rows = append(rows, row("10", "35.3", b[1], 2, b[0]))
+	}
+	out := map[string]Sighting{}
+	for _, s := range l.add(Board{Stop: "D", At: at, Rows: rows}) {
+		out[s.ID] = s
+	}
+	if len(out) != len(buses) {
+		t.Fatalf("sightings %v", out)
+	}
+	return out
 }
 
 // The one trip whose time where the bus is lies 3 min early to 10 min late is its run.
@@ -787,7 +814,7 @@ func TestTimeRunOnlyWhenSure(t *testing.T) {
 		m := buildModel(rw)
 		s := devAt(t, m, c.lon, c.at)
 		s.Against = c.against
-		if _, _, ok := runOf(m.Routes["10"], s); ok {
+		if _, _, ok := timeRun(m.Routes["10"], s, nil); ok {
 			t.Fatalf("%s: no run", c.name)
 		}
 	}
@@ -849,5 +876,111 @@ func TestTimeRunPastMidnight(t *testing.T) {
 	date, dep, ok := runOf(m.Routes["10"], devAt(t, m, "25.115", base+24*3600+15*60))
 	if !ok || date != "2026-11-10" || dep != 24*3600+10*60 {
 		t.Fatalf("run %s %d %v, want the 24:10 of 2026-11-10", date, dep, ok)
+	}
+}
+
+// A run another bus of the route holds is not a candidate (#155): of two trips in time, the one
+// no bus is on names the device-id bus's run; when the only trip in time is held, no run.
+func TestTimeRunSkipsARunAnotherBusHolds(t *testing.T) {
+	raw := runRaw(2)
+	for i, st := range []string{"A", "B", "C", "D"} { // 17:25, in time at 1361 m too
+		raw.Trips["10"] = append(raw.Trips["10"], RawTripRow{ID: 9, Day: 2, RouteCode: "10", StopCode: st, TripTime: fmt.Sprintf("17:%02d", 25+2*i)})
+	}
+	m := buildModel(raw)
+	base, _, _ := dayBase("2026-11-10")
+	at, t1725 := base+t1720+300, t1720+300
+	if _, _, ok := runOf(m.Routes["10"], devAt(t, m, "25.115", at)); ok {
+		t.Fatal("setup: two trips in time, no run")
+	}
+	got := liveAt(t, newLiveCity(m), at, [2]string{codeOf("2026-11-10", "10", t1725), "25.112"}, [2]string{devID, "25.115"})
+	if date, dep, ok := runOf(m.Routes["10"], got[devID]); !ok || date != "2026-11-10" || dep != t1720 {
+		t.Fatalf("the 17:25 is held: run %s %d %v, want the 17:20", date, dep, ok)
+	}
+	m = buildModel(runRaw(2))
+	got = liveAt(t, newLiveCity(m), at, [2]string{codeOf("2026-11-10", "10", t1720), "25.112"}, [2]string{devID, "25.115"})
+	if _, _, ok := runOf(m.Routes["10"], got[devID]); ok {
+		t.Fatal("the only trip in time is held by the coded bus: no run")
+	}
+	// A bus of another day's run, or one gone (older than MaxAge), holds nothing.
+	l := newLiveCity(m)
+	liveAt(t, l, at-MaxAge-10, [2]string{codeOf("2026-11-10", "10", t1720), "25.112"})
+	if _, _, ok := runOf(m.Routes["10"], liveAt(t, l, at, [2]string{devID, "25.115"})[devID]); !ok {
+		t.Fatal("a bus not seen for over MaxAge holds no run")
+	}
+}
+
+// Once a device-id bus has a run, it keeps it while it goes on along its route (#155): a late
+// bus keeps its run. A step back, a gap over MaxAge or a sighting against its route ends it.
+func TestDeviceBusKeepsItsRunWhileItGoesOn(t *testing.T) {
+	m := buildModel(runRaw(2))
+	r := m.Routes["10"]
+	base, _, _ := dayBase("2026-11-10")
+	at := base + t1720 + 300
+	for _, c := range []struct {
+		name string
+		lon  string
+		gap  int64
+		keep bool
+	}{
+		{"on along the route, 15 min late", "25.118", 60, true},
+		{"standing", "25.115", 60, true},
+		{"back on the route", "25.110", 60, false},
+		{"not seen for over MaxAge", "25.118", MaxAge + 10, false},
+	} {
+		l := newLiveCity(m)
+		if _, dep, ok := runOf(r, liveAt(t, l, at, [2]string{devID, "25.115"})[devID]); !ok || dep != t1720 {
+			t.Fatalf("%s: setup: the 17:20 by time", c.name)
+		}
+		// Later sightings fall out of the time window: 17:23 is due at 1361 m, the bus is there
+		// 15 min later.
+		later := at + 15*60
+		for x := at + 60; x <= later-c.gap; x += 60 { // seen every minute, standing
+			liveAt(t, l, x, [2]string{devID, "25.115"})
+		}
+		s := liveAt(t, l, later, [2]string{devID, c.lon})[devID]
+		if _, _, ok := timeRun(r, s, nil); ok {
+			t.Fatalf("%s: setup: no run by time 15 min late", c.name)
+		}
+		_, dep, ok := runOf(r, s)
+		if c.keep && (!ok || dep != t1720) {
+			t.Fatalf("%s: keeps the 17:20, got %d %v", c.name, dep, ok)
+		}
+		if !c.keep && ok {
+			t.Fatalf("%s: no run, got %d", c.name, dep)
+		}
+	}
+}
+
+// Review of #155: the buses of one board hold their runs whatever their order; a bus never keeps
+// a run another bus holds; a held run whose departure names another trip does not end the match.
+func TestHeldRunsWhateverTheOrder(t *testing.T) {
+	m := buildModel(runRaw(2))
+	r := m.Routes["10"]
+	base, _, _ := dayBase("2026-11-10")
+	at, coded := base+t1720+300, codeOf("2026-11-10", "10", t1720)
+	got := liveAt(t, newLiveCity(m), at, [2]string{devID, "25.115"}, [2]string{coded, "25.112"})
+	if _, _, ok := runOf(r, got[devID]); ok {
+		t.Fatal("device bus first on the board: the coded bus later on it holds the 17:20")
+	}
+	l := newLiveCity(m)
+	if _, dep, ok := runOf(r, liveAt(t, l, at, [2]string{devID, "25.115"})[devID]); !ok || dep != t1720 {
+		t.Fatal("setup: alone, the 17:20")
+	}
+	got = liveAt(t, l, at+60, [2]string{coded, "25.112"}, [2]string{devID, "25.116"})
+	if _, _, ok := runOf(r, got[devID]); ok {
+		t.Fatal("the coded bus now holds the 17:20: the device bus does not keep it")
+	}
+
+	raw := runRaw(2)
+	raw.Trips["10"] = append([]RawTripRow{ // id 5 leaves at 17:20 too, first in the model, 20 min slower
+		{ID: 5, Day: 2, RouteCode: "10", StopCode: "A", TripTime: "17:20"},
+		{ID: 5, Day: 2, RouteCode: "10", StopCode: "B", TripTime: "17:40"}}, raw.Trips["10"]...)
+	for i, st := range []string{"A", "B", "C", "D"} { // 17:25, in time at 1361 m too
+		raw.Trips["10"] = append(raw.Trips["10"], RawTripRow{ID: 9, Day: 2, RouteCode: "10", StopCode: st, TripTime: fmt.Sprintf("17:%02d", 25+2*i)})
+	}
+	m = buildModel(raw)
+	got = liveAt(t, newLiveCity(m), at, [2]string{coded, "25.112"}, [2]string{devID, "25.115"})
+	if _, dep, ok := runOf(m.Routes["10"], got[devID]); !ok || dep != t1720+300 {
+		t.Fatalf("the 17:20 is held: the 17:25, got %d %v", dep, ok)
 	}
 }

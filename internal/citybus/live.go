@@ -297,7 +297,19 @@ const (
 func (l *liveCity) add(b Board) []Sighting {
 	l.Boards[b.Stop] = b
 	found := sightingsAfter(l.model, b, l.Buses)
+	// The coded buses of this board hold their runs before any device bus of it is matched, so the
+	// order of its rows does not matter.
+	board := map[string]Sighting{}
 	for _, s := range found {
+		if _, _, coded := runCode(s.ID); coded {
+			board[s.ID] = s
+		}
+	}
+	for i := range found {
+		if _, _, coded := runCode(found[i].ID); !coded {
+			found[i].RunDate, found[i].RunDep = l.devRun(found[i], board)
+		}
+		s := found[i]
 		old, ok := l.Buses[s.ID]
 		// Newer wins; at the same time, the board of the nearer stop (its minutes are surer).
 		if !ok || s.Seen > old.Seen || (s.Seen == old.Seen && s.ToM-s.M < old.ToM-old.M) {
@@ -318,6 +330,38 @@ func (l *liveCity) add(b Board) []Sighting {
 		}
 	}
 	return found
+}
+
+// devRun: the run of a device-id bus (#155). The timetable names it (timeRun), leaving out the
+// runs the other buses of its route are on (seen within MaxAge, or coded buses of the same board);
+// else the bus keeps the run of its last sighting while it goes on along the same route (a late
+// bus keeps its run), unless another bus now holds it. "" for none.
+func (l *liveCity) devRun(s Sighting, board map[string]Sighting) (string, int) {
+	r := l.model.Routes[s.Route]
+	held := map[string]bool{}
+	hold := func(o Sighting) {
+		if o.ID == s.ID || o.Route != s.Route || o.Seen < s.Seen-MaxAge || o.Seen > s.Seen+MaxAge {
+			return
+		}
+		if date, dep, ok := runOf(r, o); ok {
+			held[runKey(date, o.Route, dep)] = true
+		}
+	}
+	for _, o := range l.Buses {
+		hold(o)
+	}
+	for _, o := range board {
+		hold(o)
+	}
+	if date, dep, ok := timeRun(r, s, held); ok {
+		return date, dep
+	}
+	old, ok := l.Buses[s.ID]
+	if ok && old.RunDate != "" && old.Route == s.Route && !s.Against && s.Seen >= old.Seen &&
+		s.Seen-old.Seen <= MaxAge && s.M >= old.M-againstSlack && !held[runKey(old.RunDate, old.Route, old.RunDep)] {
+		return old.RunDate, old.RunDep
+	}
+	return "", 0
 }
 
 func (l *liveCity) prune(now int64) {
