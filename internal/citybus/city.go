@@ -422,7 +422,7 @@ func (c *City) writeFixLocked(s Sighting) {
 	}
 	c.histLast[s.ID] = histFix{Lat: s.Lat, Lon: s.Lon, At: s.Seen}
 	trip := ""
-	if t, _, _ := c.runOfRoute(route, s.ID); t != nil {
+	if t, _, _ := c.runOfRoute(route, s); t != nil {
 		trip = t.ID
 	}
 	c.hist.Add(history.Row{FixT: s.Seen, Line: c.lid(route.Line), RouteCode: s.Route, Veh: c.lid(s.ID),
