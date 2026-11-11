@@ -260,9 +260,9 @@ func (m *Matcher) MatchLine(line string, vehicles []Obs) []Result {
 	}
 	if m.Kind == Memory {
 		var now time.Time
-		for _, v := range vehicles {
-			if v.Time.After(now) {
-				now = v.Time
+		for _, r := range byID { // only the fixes kept, not dropped duplicates
+			if r.Time.After(now) {
+				now = r.Time
 			}
 		}
 		cands = m.applyCommits(cands, byID, now)
