@@ -212,6 +212,10 @@ type Sighting struct {
 	// it no longer drives. Shown at its GPS point, with no estimate, hold or path (#147).
 	Against bool
 	BackM   float64 // while Against: the furthest point back it reached; progress counts from it
+	// RunDate, RunDep: the run of a device-id bus from the timetable (liveCity.devRun, #155);
+	// RunDate is "" when it has none. A coded bus's run is in its ID.
+	RunDate string
+	RunDep  int
 }
 
 // Placed is where a bus is at a given time.
