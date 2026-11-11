@@ -1094,3 +1094,20 @@ func TestLiveCityOldSightingSetsNothing(t *testing.T) {
 		t.Fatal("a sighting older than MaxAge does not make the bus against its route")
 	}
 }
+
+// Progress out of against counts from the furthest point back: a bus that goes on 20 m at a
+// time is on its route again after 40 m (#147, review 2).
+func TestLiveCityAgainstEndsAfterGradualProgress(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	at := func(ts int64, lon string) {
+		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", lon, 2, "v")}})
+	}
+	at(1000, "25.118")  // ~1634 m
+	at(1010, "25.116")  // ~1452 m: against
+	at(1020, "25.1162") // +18 m
+	at(1030, "25.1164") // +36 m from the furthest point back
+	if l.Buses["v"].Against {
+		t.Fatal("36 m on from the furthest point back ends against")
+	}
+}

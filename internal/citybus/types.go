@@ -211,6 +211,7 @@ type Sighting struct {
 	// Against: every pass of its route is behind its last sighting: citybus.gr lists it on a run
 	// it no longer drives. Shown at its GPS point, with no estimate, hold or path (#147).
 	Against bool
+	BackM   float64 // while Against: the furthest point back it reached; progress counts from it
 }
 
 // Placed is where a bus is at a given time.
