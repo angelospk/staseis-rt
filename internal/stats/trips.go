@@ -25,9 +25,10 @@ const (
 	RunBack = 0.5
 
 	// The plan a line's trips come from (schedule_source); a day with both is SourceMixed.
-	SourceDaily = "oasa_daily"
-	SourceGTFS  = "gtfs"
-	SourceMixed = "mixed"
+	SourceDaily     = "oasa_daily"
+	SourceGTFS      = "gtfs"
+	SourceMixed     = "mixed"
+	SourceTimetable = "citybus_timetable" // the timetable of a citybus.gr city (staseis-rt#151)
 )
 
 // PlanTrip is one scheduled trip of a day. FromM and ToM are the metres along the shape of its
@@ -45,7 +46,8 @@ type PlanTrip struct {
 // for the lines of Daily the runs of OASA's daily schedule instead (UseDaily).
 type Plan struct {
 	GTFS    string     `json:"gtfs"`
-	Expired bool       `json:"expired"` // the day lies outside the feed's validity
+	Expired bool       `json:"expired"`          // the day lies outside the feed's validity
+	Source  string     `json:"source,omitempty"` // where the GTFS trips come from; "" = SourceGTFS
 	Trips   []PlanTrip `json:"trips"`
 	Daily   []DailyDir `json:"daily,omitempty"`
 }
@@ -343,8 +345,12 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 		}
 		return l
 	}
+	source := plan.Source
+	if source == "" {
+		source = SourceGTFS
+	}
 	for k, pt := range plan.Trips {
-		lineOf(pt.Line, SourceGTFS).count(state[k], Span{pt.FromM, pt.ToM}, pt.ID)
+		lineOf(pt.Line, source).count(state[k], Span{pt.FromM, pt.ToM}, pt.ID)
 	}
 	byDir := make([][]*busRun, len(plan.Daily))
 	for _, b := range c.buses {
@@ -396,12 +402,12 @@ func (c *tripCounter) result(loc *time.Location) *Trips {
 		sources[l.ScheduleSource] = true
 	}
 	switch {
-	case sources[SourceDaily] && sources[SourceGTFS]:
+	case sources[SourceDaily] && sources[source]:
 		out.ScheduleSource = SourceMixed
 	case sources[SourceDaily]:
 		out.ScheduleSource = SourceDaily
 	default:
-		out.ScheduleSource = SourceGTFS
+		out.ScheduleSource = source
 	}
 	sort.Slice(out.ByLine, func(i, j int) bool { return out.ByLine[i].Line < out.ByLine[j].Line })
 	return out

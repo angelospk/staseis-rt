@@ -59,6 +59,15 @@ cities; `/` and `/{city}/debug` show the rotation state.
   city code (`cfu:2A`, `cfu:20261110_4_0100000_17_20`: codes repeat across cities), `fix_t` is the
   time the board was read, `trip_id` the run from the code (empty when none), `s_m` the metre on
   the route shape; `shape_id`, `delay_s`, `run_start`, `start_delay_s` are empty. Off by default.
+- Daily statistics (#151), with `--history` only: every hour each city sums its finished days from
+  its own rows (`line` starts with its code) into `<state>/<slug>/stats`, in the format of
+  [API.md](API.md#daily-statistics), served at `/{code}/v1/stats` and `/{code}/v1/stats/days/{date}`.
+  Speed counts only pairs that moved: `fix_t` is the board's time, so a stale GPS place looks like
+  a standing bus. `trips` count against the citybus.gr timetable (`schedule_source:
+  citybus_timetable`); a device-id bus is matched to a run about 3 times in 4, so `missed` is an
+  upper bound. No `start_delay`. A day with no row of the city gets a `.none` marker instead, so it
+  is not read again. The `stats` workflow copies the days to `v1/<slug>/` on the `stats` branch,
+  listed in `v1/cities.json`.
 - `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
   the city's current data (a sha256 of it, saved in `static.json`). A daily reload of the same data
   keeps it, so the bot's alerts and the web's stop index (`trips-<city>.json`) stay valid.

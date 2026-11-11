@@ -75,10 +75,11 @@ func confOf(id string) (Conf, bool) {
 
 // Service is every enabled citybus city behind one HTTP handler.
 type Service struct {
-	cities map[string]*City
-	order  []*City
-	log    *slog.Logger
-	hist   *history.Writer // the one fix history of every city; nil = off
+	cities  map[string]*City
+	order   []*City
+	log     *slog.Logger
+	hist    *history.Writer // the one fix history of every city; nil = off
+	histDir string          // the directory of that history
 }
 
 // New builds the cities; Run starts their rotations.
@@ -90,7 +91,7 @@ func New(cfg Config, log *slog.Logger) (*Service, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.hist = h
+		s.hist, s.histDir = h, filepath.Join(cfg.StateDir, "history")
 	}
 	for _, conf := range Cities {
 		on := false
@@ -130,6 +131,10 @@ func (s *Service) Run(ctx context.Context, listen string) error {
 	for _, c := range s.order {
 		wg.Add(1)
 		go func() { defer wg.Done(); c.rotate(ctx) }()
+	}
+	if s.hist != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); s.dailyStats(ctx, s.histDir) }()
 	}
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
@@ -229,6 +234,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var (
 	reStaticLine   = regexp.MustCompile(`^/static/v1/lines/([^/]+)\.json$`)
+	reStatsDay     = regexp.MustCompile(`^/v1/stats/days/([^/]+)$`)
 	reV2LineVeh    = regexp.MustCompile(`^/v2/lines/([^/]+)/vehicles$`)
 	reV2Line       = regexp.MustCompile(`^/v2/lines/([^/]+)$`)
 	reV2Stop       = regexp.MustCompile(`^/v2/stops/([^/]+)$`)
@@ -248,6 +254,9 @@ func dec(s string) string {
 }
 
 func (c *City) route(w http.ResponseWriter, path string) {
+	if c.statsRoute(w, path) {
+		return // the stats files are written by the service, not by the model
+	}
 	switch path {
 	case "/v1/status":
 		writeJSON(w, c.status(), http.StatusOK, 10)

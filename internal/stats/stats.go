@@ -129,12 +129,23 @@ type rec struct {
 	lat, lon float64 // degrees; 0 when unknown
 }
 
+// Filter keeps part of the rows of the files: the rows of one city of a shared history.
+type Filter struct {
+	Prefix    string // keep only rows whose line column starts with Prefix ("" = every row)
+	MovedOnly bool   // drop a speed pair whose two fixes are at the same place
+}
+
 // Compute sums one day from its input files. A fix counts for the day of its fix time; a speed
 // sample is a pair of consecutive fixes of a vehicle inside the day, on the same line, MinGap to
 // MaxGap apart and at most MaxSpeed, credited to the later fix's hour and line. With a plan, the
 // matched rows of the files (the day, TripSlack before and TripsAfter after) say how many of the
 // plan's trips ran.
 func Compute(date string, loc *time.Location, files []string, now time.Time, plan *Plan) (*Day, error) {
+	return ComputeFiltered(date, loc, files, now, plan, Filter{})
+}
+
+// ComputeFiltered is Compute over the rows f keeps.
+func ComputeFiltered(date string, loc *time.Location, files []string, now time.Time, plan *Plan, f Filter) (*Day, error) {
 	start, end, err := Bounds(date, loc)
 	if err != nil {
 		return nil, err
@@ -146,9 +157,9 @@ func Compute(date string, loc *time.Location, files []string, now time.Time, pla
 		trips = newTripCounter(plan)
 	}
 	strs := map[string]string{}
-	for _, f := range files {
-		if recs, err = readFile(f, start.Unix(), end.Unix(), recs, strs, trips, delays); err != nil {
-			return nil, fmt.Errorf("%s: %w", filepath.Base(f), err)
+	for _, file := range files {
+		if recs, err = readFile(file, start.Unix(), end.Unix(), recs, strs, trips, delays, f); err != nil {
+			return nil, fmt.Errorf("%s: %w", filepath.Base(file), err)
 		}
 	}
 	sort.SliceStable(recs, func(i, j int) bool {
@@ -197,7 +208,7 @@ func Compute(date string, loc *time.Location, files []string, now time.Time, pla
 		}
 		day.LastFix = max(day.LastFix, r.t)
 		if prev != nil && prev.veh == r.veh {
-			if d, dt, ok := sample(prev, r); ok {
+			if d, dt, ok := sample(prev, r, f.MovedOnly); ok {
 				h.dist += d
 				h.secs += dt
 				l.dist += d
@@ -221,10 +232,15 @@ func Compute(date string, loc *time.Location, files []string, now time.Time, pla
 	return day, nil
 }
 
-// sample returns the straight-line distance and the time between two fixes of one vehicle.
-func sample(a, b *rec) (dist, secs float64, ok bool) {
+// sample returns the straight-line distance and the time between two fixes of one vehicle. With
+// movedOnly, a pair at one place is dropped: a citybus row's time is when its board was read, not
+// the GPS time, so a standing bus may hold a stale place (staseis-rt#151).
+func sample(a, b *rec, movedOnly bool) (dist, secs float64, ok bool) {
 	dt := time.Duration(b.t-a.t) * time.Second
 	if a.line != b.line || dt < MinGap || dt > MaxGap || a.lat == 0 || b.lat == 0 || a.lon == 0 || b.lon == 0 {
+		return 0, 0, false
+	}
+	if movedOnly && a.lat == b.lat && a.lon == b.lon {
 		return 0, 0, false
 	}
 	const r = 6371000.0
@@ -240,15 +256,15 @@ func sample(a, b *rec) (dist, secs float64, ok bool) {
 }
 
 // readFile appends the rows of one gzipped history file whose fix time is in [from, to), gives
-// every matched row to trips (when not nil) and every row with a start delay to delays. Strings
-// repeat a lot: strs interns them.
-func readFile(path string, from, to int64, recs []rec, strs map[string]string, trips *tripCounter, delays *delayCounter) ([]rec, error) {
-	f, err := os.Open(path)
+// every matched row to trips (when not nil) and every row with a start delay to delays. Rows f
+// leaves out count nowhere. Strings repeat a lot: strs interns them.
+func readFile(path string, from, to int64, recs []rec, strs map[string]string, trips *tripCounter, delays *delayCounter, f Filter) ([]rec, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		return recs, err
 	}
-	defer f.Close()
-	zr, err := gzip.NewReader(f)
+	defer file.Close()
+	zr, err := gzip.NewReader(file)
 	if err != nil {
 		return recs, err
 	}
@@ -291,6 +307,9 @@ func readFile(path string, from, to int64, recs []rec, strs map[string]string, t
 		}
 		if len(row) != len(head) {
 			continue // a row cut by a crash
+		}
+		if f.Prefix != "" && !strings.HasPrefix(row[col["line"]], f.Prefix) {
+			continue // a row of another city of the shared history
 		}
 		t, err := strconv.ParseInt(row[col["fix_t"]], 10, 64)
 		if err != nil {
@@ -342,6 +361,11 @@ func optCol(col map[string]int, name string) int {
 // files. It returns the days written. A day that fails, or whose plan is not available, is
 // skipped (the next run retries it). A nil plan leaves the days without trips.
 func Run(historyDir, out string, loc *time.Location, now time.Time, force bool, plan PlanFunc) ([]string, error) {
+	return RunFiltered(historyDir, out, loc, now, force, plan, Filter{})
+}
+
+// RunFiltered is Run over the rows f keeps.
+func RunFiltered(historyDir, out string, loc *time.Location, now time.Time, force bool, plan PlanFunc, f Filter) ([]string, error) {
 	daysDir := filepath.Join(out, "days")
 	if err := os.MkdirAll(daysDir, 0o755); err != nil {
 		return nil, err
@@ -351,7 +375,10 @@ func Run(historyDir, out string, loc *time.Location, now time.Time, force bool, 
 	for _, date := range candidates(historyDir, loc) {
 		_, end, _ := Bounds(date, loc)
 		dst := filepath.Join(daysDir, date+".json")
-		if now.Before(end.Add(Settle)) || (!force && exists(dst)) {
+		// none marks a day with no row f keeps: a city of a shared history must not read the
+		// day's files again every hour (staseis-rt#151). Only with a prefix: Athens keeps its way.
+		none := filepath.Join(daysDir, date+".none")
+		if now.Before(end.Add(Settle)) || (!force && (exists(dst) || f.Prefix != "" && exists(none))) {
 			continue
 		}
 		files, ready, err := Inputs(historyDir, date, loc)
@@ -366,9 +393,14 @@ func Run(historyDir, out string, loc *time.Location, now time.Time, force bool, 
 				continue
 			}
 		}
-		day, err := Compute(date, loc, files, now, p)
+		day, err := ComputeFiltered(date, loc, files, now, p, f)
 		if err == nil && day.Fixes == 0 {
-			continue // only late files of the next day: nothing to say about this one
+			if f.Prefix != "" {
+				if err := os.WriteFile(none, nil, 0o644); err != nil {
+					errs = append(errs, fmt.Errorf("stats %s: %w", date, err))
+				}
+			}
+			continue // only late files of the next day, or no row of the city: nothing to say
 		}
 		if err == nil {
 			err = writeJSON(dst, day)
