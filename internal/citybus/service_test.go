@@ -271,16 +271,26 @@ func TestReloadKeepsOldTripsAndNeverWritesModelWithoutStopOrders(t *testing.T) {
 	if n := len(c.model.Routes["10"].Trips); n != 1 {
 		t.Fatalf("a failed trips answer must keep the old trips; got %d", n)
 	}
-	before, _ := os.ReadFile(filepath.Join(dir, "t", "static.json"))
+	// The old trips come from static.json on disk, not from memory: a new City (a restart) that
+	// reloads while the trips fail still keeps them.
+	c2 := testCity(t, f, dir)
+	if err := c2.loadStatic(ctx, true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(c2.model.Routes["10"].Trips); n != 1 {
+		t.Fatalf("after a restart a failed trips answer must keep the trips on disk; got %d", n)
+	}
+	file := filepath.Join(dir, "t", "static.json")
+	if err := os.Remove(file); err != nil { // no old model to fall back on
+		t.Fatal(err)
+	}
 	fail.Store("/sequence")
-	c.raw = nil // no old model to fall back on
 	err := c.loadStatic(ctx, true, priWatched)
 	if err == nil || !strings.Contains(err.Error(), "stop order") {
 		t.Fatalf("err %v", err)
 	}
-	after, _ := os.ReadFile(filepath.Join(dir, "t", "static.json"))
-	if string(before) != string(after) {
-		t.Fatal("static.json must not change on a failed load")
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatal("a failed load must not write static.json")
 	}
 }
 

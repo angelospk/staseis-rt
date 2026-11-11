@@ -96,7 +96,6 @@ type City struct {
 	mu          sync.Mutex
 	model       *Model
 	live        *liveCity
-	raw         *RawCity
 	health      *LineHealth
 	probes      []string
 	checkProbes map[string][]string // timetable-only line -> its probe stops
@@ -190,11 +189,13 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 	}
 	raw := &RawCity{Lines: *lines, Stops: *stops, Sequences: map[string][]RawSeq{}, Points: map[string][]RawPoints{},
 		Trips: map[string][]RawTripRow{}, BuiltAt: c.unix()}
-	c.mu.Lock()
-	prev := c.raw
-	c.mu.Unlock()
-	if prev == nil {
-		prev = &RawCity{}
+	// The last good load is the fallback for a failed answer. It is read from disk only here: kept
+	// in memory, the raw rows of all cities took about 180 MB.
+	prev := &RawCity{}
+	if b, err := os.ReadFile(file); err == nil {
+		if err := json.Unmarshal(b, prev); err != nil {
+			prev = &RawCity{}
+		}
 	}
 	var (
 		mu      sync.Mutex
@@ -309,7 +310,7 @@ func (c *City) install(raw *RawCity) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	old := c.live
-	c.raw, c.model, c.live = raw, model, newLiveCity(model)
+	c.model, c.live = model, newLiveCity(model)
 	if old != nil {
 		for _, b := range old.Boards {
 			c.live.add(b)
