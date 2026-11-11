@@ -191,11 +191,22 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 		Trips: map[string][]RawTripRow{}, BuiltAt: c.unix()}
 	// The last good load is the fallback for a failed answer. It is read from disk only here: kept
 	// in memory, the raw rows of all cities took about 180 MB.
+	// Without a readable file, a city that already has a model keeps it rather than reload with
+	// no fallback; only a first load starts from nothing.
 	prev := &RawCity{}
-	if b, err := os.ReadFile(file); err == nil {
-		if err := json.Unmarshal(b, prev); err != nil {
-			prev = &RawCity{}
+	b, err := os.ReadFile(file)
+	if err == nil {
+		err = json.Unmarshal(b, prev)
+	}
+	b = nil
+	if err != nil {
+		c.mu.Lock()
+		installed := c.model != nil
+		c.mu.Unlock()
+		if installed {
+			return fmt.Errorf("static.json for the fallback: %w", err)
 		}
+		prev = &RawCity{}
 	}
 	var (
 		mu      sync.Mutex
@@ -291,7 +302,7 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 			raw.Version = prev.version()
 		}
 	}
-	b, err := json.Marshal(raw)
+	b, err = json.Marshal(raw)
 	if err != nil {
 		return err
 	}
