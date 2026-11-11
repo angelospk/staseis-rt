@@ -1,0 +1,13 @@
+# Twice a day: a day is ready about 5 h after Athens midnight; the second run retries. A run with
+# nothing new uploads nothing.
+[Unit]
+Description=atrt: citybus fix history to GitHub Releases, daily
+
+[Timer]
+OnCalendar=*-*-* 05:30:00 Europe/Athens
+OnCalendar=*-*-* 11:30:00 Europe/Athens
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
