@@ -74,6 +74,9 @@ type Day struct {
 	Trips       *Trips `json:"trips,omitempty"` // scheduled trips that ran; absent without a plan of the feed the rows used
 	// StartDelay: how late the runs of OASA's daily schedule left; absent when no run was measured.
 	StartDelay *StartDelays `json:"start_delay,omitempty"`
+	// Headways: regularity of the high-frequency lines of OASA's daily schedule; absent when no
+	// direction qualifies.
+	Headways *Headways `json:"headways,omitempty"`
 }
 
 type Index struct {
@@ -184,6 +187,7 @@ func ComputeFiltered(date string, loc *time.Location, files []string, now time.T
 	day := &Day{Version: Version, Date: date, TZ: loc.String(), GeneratedAt: now.Unix(), Files: len(files)}
 	if trips != nil {
 		day.Trips = trips.result(loc)
+		day.Headways = trips.headways(start, loc)
 	}
 	day.StartDelay = delays.result()
 	vehs := map[string]bool{}

@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"math"
 	"sort"
 	"time"
 
@@ -207,6 +208,8 @@ type busRun struct {
 	span              Span
 	first, last, near int64   // first and last fix; last fix near the start (0: none)
 	at                float64 // share of the route at the last measured fix (-1: none)
+	atT               int64   // time of that fix
+	pass              int64   // when the bus passed HeadwayAt of the route (0: not seen)
 }
 
 // left is when the bus left its start (DailyDir).
@@ -281,7 +284,11 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 			c.buses = append(c.buses, b)
 		}
 		if t >= b.last && share >= 0 {
-			b.at = share
+			if b.pass == 0 && b.at >= 0 && b.at < HeadwayAt && share >= HeadwayAt && t > b.atT &&
+				t-b.atT <= int64(HeadwayMaxGap/time.Second) {
+				b.pass = b.atT + int64(math.Round(float64(t-b.atT)*(HeadwayAt-b.at)/(share-b.at)))
+			}
+			b.at, b.atT = share, t
 		}
 		b.first, b.last = min(b.first, t), max(b.last, t)
 		if sm >= 0 && sm-sp.FromM <= RunNearM {

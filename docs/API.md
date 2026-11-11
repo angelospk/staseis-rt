@@ -447,6 +447,7 @@ the earlier files, but `index.json` and `latest.json` skip them):
 | `by_line[]` | every line with a fix: `line`, `fixes`, `vehicles`, `dist_m`, `time_s` |
 | `trips` | scheduled trips of the day and how many ran (below); missing when the server had no static GTFS of the day's history |
 | `start_delay` | how late the runs of OASA's daily schedule left (below); missing when no run of the day was measured (every day before the field shipped) |
+| `headways` | regularity (headway adherence) of the high-frequency lines of OASA's daily schedule (below); missing when no direction qualifies (every day before the field shipped) |
 
 Speed in km/h = `dist_m / time_s * 3.6`; `time_s` 0 means no speed. Sums, not averages, so
 several days add up exactly. A speed sample is two consecutive fixes of one vehicle on the
@@ -524,6 +525,32 @@ scheduled departure. Only while the static GTFS is expired (the server pairs bus
 runs only then). Runs whose departure was not seen (the bus appeared on its way), lines whose daily
 schedule did not load, and short-headway runs that two buses could have taken are not measured,
 so `runs` is a sample, not every run.
+
+### Headway regularity (`headways`)
+
+```json
+"headways": {"from_h": 7, "to_h": 21, "at": 0.5, "by_line": [
+  {"line": "040", "dir": 0, "n": 96, "ref_headway_median_s": 480, "mean_headway_s": 512, "cv_h": 0.412, "ewt_min": 1.35, "los": "D"}
+]}
+```
+
+| Field | Meaning |
+|---|---|
+| `from_h`, `to_h` | local hours of the window: passes from 07:00 to before 21:00 count |
+| `at` | the reference point: share of the route (0.5 = mid-route) a bus passes |
+| `by_line[]` | one entry per direction of a line (`dir` 0 Go, 1 Come), by line then `dir` |
+| `n` | headways measured (at least 8) |
+| `ref_headway_median_s` | median observed headway, the reference (at most 720 s: only high-frequency directions are listed) |
+| `mean_headway_s` | mean observed headway |
+| `cv_h` | stddev of the headways / `ref_headway_median_s` (TCQSM headway adherence, with the median observed headway in place of the scheduled one) |
+| `ewt_min` | excess wait time in minutes: sum(h²) / (2 sum(h)) - ref / 2 (can be slightly negative when the mean is below the median) |
+| `los` | TCQSM level of service of `cv_h`: A ≤ 0.21, B ≤ 0.30, C ≤ 0.39, D ≤ 0.52, E ≤ 0.74, F above |
+
+A pass is the time a bus run of a daily direction (same bus runs as `trips`) crosses `at` of the
+route, interpolated between two fixes at most 5 min apart; a run first seen past the point has
+no pass. Headways are the gaps between consecutive passes of the direction in the window. Only
+lines planned from OASA's daily schedule (`oasa_daily`). A bus without working telematics makes a
+long gap, so `cv_h` and `ewt_min` are upper bounds.
 
 ## GTFS-Realtime details
 
