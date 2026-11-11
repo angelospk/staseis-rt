@@ -236,11 +236,17 @@ func TestPathAhead(t *testing.T) {
 	if len(p) != 2 || !nearLL(p[0], l.XY[0], 1000) || !nearLL(p[1], l.XY[0], 1600) || b != nil || !slices.Equal(at, []int{600}) {
 		t.Fatalf("to next stop: %v %v %v", p, b, at)
 	}
-	// path_beyond: on to the third stop ahead; path_stops along both.
-	p, b, at = pathAhead(l, 1000, ptr(5.0), []float64{1300, 1700, 2100, 2400})
-	if !nearLL(p[len(p)-1], l.XY[0], 1300) || !nearLL(b[0], l.XY[0], 1300) || !nearLL(b[len(b)-1], l.XY[0], 2100) ||
-		!slices.Equal(at, []int{300, 700, 1100}) {
-		t.Fatalf("three stops: %v %v %v", p, b, at)
+	// path_beyond: on to the third stop ahead, and on past it while a 240 s drive at the current
+	// speed (1500 m at least) is not covered, cut there; path_stops along both.
+	p, b, at = pathAhead(l, 1000, ptr(5.0), []float64{1300, 1700, 2100, 2400, 2700})
+	if !nearLL(p[len(p)-1], l.XY[0], 1300) || !nearLL(b[0], l.XY[0], 1300) || !nearLL(b[len(b)-1], l.XY[0], 2500) ||
+		!slices.Equal(at, []int{300, 700, 1100, 1400}) {
+		t.Fatalf("stops to cover 1500 m: %v %v %v", p, b, at)
+	}
+	// Fast (12 m/s: 2880 m to cover), the continuation runs on to the stop past that.
+	_, b, at = pathAhead(l, 1000, ptr(12.0), []float64{1300, 1700, 2100, 2400, 2700, 3500, 4200, 5000})
+	if !nearLL(b[len(b)-1], l.XY[0], 3880) || !slices.Equal(at, []int{300, 700, 1100, 1400, 1700, 2500}) {
+		t.Fatalf("fast: %v %v", b, at)
 	}
 	// At most 1500 m: stops beyond are left out.
 	p, b, at = pathAhead(l, 1000, nil, []float64{1200, 2800, 3000})

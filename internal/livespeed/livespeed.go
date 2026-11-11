@@ -198,6 +198,16 @@ func (g *Grid) Blend(typical []*float64, line *geo.Polyline, s float64, now int6
 	return out
 }
 
+// Over returns the speed over [from, to] of line with today's traffic: each piece with a live
+// speed at LiveWeight of it and the rest of typical (live alone when typical is nil), a piece
+// without at typical. ok is false when no piece has a live speed, or the grid is nil.
+func (g *Grid) Over(line *geo.Polyline, from, to float64, typical *float64, now int64) (float64, bool) {
+	if g == nil || line == nil || len(line.XY) < 2 || to <= from {
+		return 0, false
+	}
+	return g.stepSpeed(line, from, to, typical, now)
+}
+
 // stepSpeed is the speed over [from, to] of line, time-weighted over its pieces: a piece with a
 // live speed at LiveWeight of it and the rest of typical (live alone without typical), a piece
 // without at typical. ok is false when no piece has a live speed. Without typical the pieces

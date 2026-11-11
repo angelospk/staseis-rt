@@ -12,20 +12,25 @@ import (
 // Motion: a few recent fixes per vehicle as distance along its line, for the `speed` and `path`
 // fields. Owned by App.matchMu.
 const (
-	motionFixes      = 5                // fixes kept per vehicle
-	motionWindowS    = 300              // fixes used for speed (other-tier lines poll every 150 s)
-	motionMinSpanS   = 20               // speed needs fixes at least this far apart
-	motionMinPairS   = 10               // pairs of fixes closer in time are not used for slopes
-	motionNoiseM     = 20               // moved less than this over the window: standing
-	motionMaxSpeed   = 20.0             // m/s (72 km/h)
-	motionBackM      = 30               // GPS noise backwards along the line
-	motionSlackM     = 100              // forward jump beyond maxSpeed*dt that is still plausible
-	motionForget     = 10 * time.Minute // tracks of vehicles not seen for this long are dropped
-	motionMaxOffM    = 150              // farther than this from the shape: no motion
-	pathHorizonS     = 150              // path covers this many seconds at the current speed ...
-	pathMinM         = 300              // ... at least this far ...
-	pathMaxM         = 1500             // ... and at most this far
-	pathStops        = 3                // with known stops: up to this many stops ahead
+	motionFixes    = 5                // fixes kept per vehicle
+	motionWindowS  = 300              // fixes used for speed (other-tier lines poll every 150 s)
+	motionMinSpanS = 20               // speed needs fixes at least this far apart
+	motionMinPairS = 10               // pairs of fixes closer in time are not used for slopes
+	motionNoiseM   = 20               // moved less than this over the window: standing
+	motionMaxSpeed = 20.0             // m/s (72 km/h)
+	motionBackM    = 30               // GPS noise backwards along the line
+	motionSlackM   = 100              // forward jump beyond maxSpeed*dt that is still plausible
+	motionForget   = 10 * time.Minute // tracks of vehicles not seen for this long are dropped
+	motionMaxOffM  = 150              // farther than this from the shape: no motion
+	pathHorizonS   = 150              // path covers this many seconds at the current speed ...
+	pathMinM       = 300              // ... at least this far ...
+	pathMaxM       = 1500             // ... and at most this far
+	pathStops      = 3                // with known stops: at least this many stops ahead ...
+	pathCoverS     = 240              // ... and far enough to drive this long at the current speed: a fix is
+	//                                     76 s old at delivery (median; 166 s at the 90th percentile) and the
+	//                                     next one 10-150 s away, and a map that runs out of path stops dead
+	//                                     until then, then jumps (web lab, 2026-11-06: a quarter of all frames)
+	pathBeyondMaxM   = 3500 // the continuation at most this far
 	pathSimplifyM    = 5
 	motionCoordScale = 1e5 // 5 decimals
 )
@@ -229,7 +234,18 @@ func pathAhead(line *geo.Polyline, s float64, speed *float64, stops []float64) (
 	if path != nil {
 		from = end
 	}
-	last := min(s+pathMaxM, line.Length(), ahead[min(pathStops, len(ahead))-1])
+	// To the pathStops-th stop, or on past it to cover pathCoverS at the current speed.
+	cover := float64(pathMaxM)
+	if speed != nil {
+		cover = min(pathBeyondMaxM, max(pathMaxM, *speed*pathCoverS))
+	}
+	last := ahead[min(pathStops, len(ahead))-1]
+	for _, x := range ahead {
+		if x > last && last < s+cover {
+			last = x
+		}
+	}
+	last = min(s+cover, line.Length(), last)
 	var offB func(float64) float64
 	if last-from >= 1 {
 		beyond, offB = simplified(line, from, last)

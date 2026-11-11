@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/angelospk/athens-transit-rt/internal/geo"
 	"github.com/angelospk/athens-transit-rt/internal/gtfs"
 	"github.com/angelospk/athens-transit-rt/internal/gtfs/gtfstest"
+	"github.com/angelospk/athens-transit-rt/internal/livespeed"
 	"github.com/angelospk/athens-transit-rt/internal/match"
 	"github.com/angelospk/athens-transit-rt/internal/sched"
 )
@@ -267,10 +269,10 @@ func TestStopBoardTravelEndsAtArrival(t *testing.T) {
 	f := w.feed
 	trip := f.Trip(0)
 	g := w.matcher.Geometry(trip)
-	if got := boardTravel(f, g, f.ShapeID(trip), nil, 0, trip, g.StopAlong[2], g.StopAlong[3]); math.Abs(got-240) > 1 {
+	if got := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, g.StopAlong[2], g.StopAlong[3], nil); math.Abs(got-240) > 1 {
 		t.Fatalf("S2 to S3: %.0f s, want 240 (leaves 10:11, due 10:15)", got)
 	}
-	if got := boardTravel(f, g, f.ShapeID(trip), nil, 0, trip, g.StopAlong[1], g.StopAlong[3]); math.Abs(got-540) > 1 {
+	if got := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, g.StopAlong[1], g.StopAlong[3], nil); math.Abs(got-540) > 1 {
 		t.Fatalf("S1 to S3: %.0f s, want 540 (the wait at S2 counts)", got)
 	}
 }
@@ -311,5 +313,70 @@ func TestStopBoardScheduleAcrossMidnight(t *testing.T) {
 	at := time.Date(2026, 10, 5, 0, 20, 0, 0, gtfs.Athens).Unix()
 	if len(sr.Arrivals) == 0 || sr.Arrivals[0].Source != "schedule" || *sr.Arrivals[0].TripID != "T00" || sr.Arrivals[0].At != at {
 		t.Fatalf("arrivals %s", asJSON(sr.Arrivals))
+	}
+}
+
+// Today's traffic counts on the stop board as on the path ahead of a bus: two buses of any
+// line that just crawled over a stretch make the ETA over it longer than the timetable says,
+// and a stretch no bus crossed lately keeps the timetable's time.
+func TestStopBoardTravelFollowsLiveSpeeds(t *testing.T) {
+	a := newApp(t, monday1020)
+	a.SetFeed(gtfstest.StraightLine{Stops: 5, Trips: 6, First: 10 * 3600, Headway: 10, Leg: 5, Dwell: 60}.Feed(t), nil)
+	w := a.world()
+	f := w.feed
+	trip := f.Trip(0)
+	g := w.matcher.Geometry(trip)
+	g = &geo.Geometry{Line: g.Line, StopAlong: g.StopAlong, FromShape: true}
+	now := monday1020.Unix()
+	roads := livespeed.New()
+	from, to := g.StopAlong[2], g.StopAlong[3]
+	// Two buses crossed the whole stretch at 1 m/s, 100 m between fixes, ending a minute ago.
+	for _, id := range []string{"A", "B"} {
+		for s0 := from; s0 < to; s0 += 100 {
+			s1 := math.Min(s0+100, to)
+			t1 := now - 60 - int64(to-s1)
+			roads.Pass(id, g.Line, s0, s1, t1-int64(s1-s0), t1)
+		}
+	}
+	base := boardTravel(f, g, f.ShapeID(trip), nil, nil, now, 0, trip, from, to, nil)
+	live := boardTravel(f, g, f.ShapeID(trip), nil, roads, now, 0, trip, from, to, nil)
+	if want := to - from; math.Abs(live-want) > 1 {
+		t.Fatalf("with live speeds: %.0f s, want %.0f (1 m/s over %.0f m), timetable alone %.0f", live, want, to-from, base)
+	}
+	// A stretch nobody crossed: as before.
+	if got := boardTravel(f, g, f.ShapeID(trip), nil, roads, now, 0, trip, g.StopAlong[0], g.StopAlong[1], nil); math.Abs(got-base) > 1 {
+		t.Fatalf("no live speeds: %.0f s, want %.0f", got, base)
+	}
+}
+
+// A bus's own speed now counts over the first 500 m: crawling at 1 m/s where the timetable
+// says 3.65 m/s, it is later than the timetable for the next stop; standing, it adds a short
+// wait; further than 500 m on, its speed no longer matters.
+func TestStopBoardTravelStartsAtTheBussOwnSpeed(t *testing.T) {
+	a := newApp(t, monday1020)
+	a.SetFeed(gtfstest.StraightLine{Stops: 5, Trips: 6, First: 10 * 3600, Headway: 10, Leg: 5, Dwell: 60}.Feed(t), nil)
+	w := a.world()
+	f := w.feed
+	trip := f.Trip(0)
+	g := w.matcher.Geometry(trip)
+	from, to := g.StopAlong[2], g.StopAlong[3] // 876 m, 240 s by the timetable
+	base := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, from, to, nil)
+	slow := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, from, to, ptr(1.0))
+	if slow <= base+80 || slow >= base+300 {
+		t.Fatalf("crawling: %.0f s, timetable %.0f: want between +80 and +300", slow, base)
+	}
+	fast := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, from, to, ptr(10.0))
+	if fast >= base {
+		t.Fatalf("fast: %.0f s, want under the timetable's %.0f", fast, base)
+	}
+	stand := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, from, to, ptr(0.0))
+	if math.Abs(stand-base-boardStandS) > 1 {
+		t.Fatalf("standing: %.0f s, want %.0f + %.0f", stand, base, boardStandS)
+	}
+	// Far down the line the bus's speed is forgotten: the last stretch is the timetable's.
+	far := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, g.StopAlong[0], g.StopAlong[4], ptr(1.0))
+	farBase := boardTravel(f, g, f.ShapeID(trip), nil, nil, 0, 0, trip, g.StopAlong[0], g.StopAlong[4], nil)
+	if far-farBase > 400 {
+		t.Fatalf("whole line crawling at first: +%.0f s, want the first 500 m only", far-farBase)
 	}
 }

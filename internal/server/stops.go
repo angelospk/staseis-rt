@@ -9,6 +9,7 @@ import (
 
 	"github.com/angelospk/athens-transit-rt/internal/geo"
 	"github.com/angelospk/athens-transit-rt/internal/gtfs"
+	"github.com/angelospk/athens-transit-rt/internal/livespeed"
 	"github.com/angelospk/athens-transit-rt/internal/match"
 	"github.com/angelospk/athens-transit-rt/internal/model"
 	"github.com/angelospk/athens-transit-rt/internal/segspeed"
@@ -30,6 +31,14 @@ const (
 	// boardMinBinMS: a slower typical bin counts this fast. The history counts layovers at
 	// terminals as driving time there.
 	boardMinBinMS = 0.5
+	// boardOwnM: over this far ahead the bus's own speed counts, all of it at first and fading
+	// to the road's; a bus stuck now is late for the next stops whatever the road's average.
+	boardOwnM = 500.0
+	// boardOwnMinMS: a bus slower than this is standing (a stop, a light): its speed says
+	// nothing about the road ahead, but it stands about boardStandS more.
+	boardOwnMinMS = 1.0
+	boardStandS   = 20.0
+	boardPieceM   = 50.0 // the first stretch is summed in pieces this long
 )
 
 type StopInfo struct {
@@ -101,8 +110,9 @@ type boardPos struct {
 	g       *geo.Geometry
 	trip    int32
 	along   float64
-	next    int  // index in the pattern of the first stop ahead
-	waiting bool // at the first stop, not left yet
+	next    int      // index in the pattern of the first stop ahead
+	waiting bool     // at the first stop, not left yet
+	speed   *float64 // its own smoothed speed (motionOf), nil unknown
 	ok      bool
 }
 
@@ -119,7 +129,7 @@ func boardPosOf(w *world, r *match.Result, shape int32, s float64, speed *float6
 		if r.Waiting {
 			next = 0
 		}
-		return boardPos{g: g, trip: r.Trip, along: r.Along, next: next, waiting: r.Waiting, ok: true}
+		return boardPos{g: g, trip: r.Trip, along: r.Along, next: next, waiting: r.Waiting, speed: speed, ok: true}
 	}
 	if shape < 0 || s < 0 {
 		return boardPos{}
@@ -137,7 +147,7 @@ func boardPosOf(w *world, r *match.Result, shape int32, s float64, speed *float6
 		return boardPos{}
 	}
 	waiting := next == 0 && math.Abs(s-g.StopAlong[0]) <= match.TerminalRadiusM && (speed == nil || *speed == 0)
-	return boardPos{g: g, trip: trip, along: s, next: next, waiting: waiting, ok: true}
+	return boardPos{g: g, trip: trip, along: s, next: next, waiting: waiting, speed: speed, ok: true}
 }
 
 // shapeTrip is the first trip of the line's most common stop pattern on a shape (the static
@@ -286,7 +296,7 @@ func (a *App) stopRows(w *world, stop int32, lines []string, now time.Time, hori
 		if b.pos.waiting && b.r.Matched() {
 			leave = takeRun(f, pending, b.line, f.Trip(b.r.Trip).Shape, now)
 		}
-		if row, ok := liveArrival(f, tab, stop, b, now, leave); ok && row.At <= until {
+		if row, ok := liveArrival(f, tab, a.roads, stop, b, now, leave); ok && row.At <= until {
 			rows = append(rows, row)
 		}
 	}
@@ -316,7 +326,7 @@ func (a *App) stopRows(w *world, stop int32, lines []string, now time.Time, hori
 // first stop has no time and is left out. Not past the stop by its last fix, it is never
 // overdue: late, it is due now. leave, when not zero, is the departure of a waiting bus instead
 // of its trip's (OASA's daily run on an expired GTFS).
-func liveArrival(f *gtfs.Feed, tab *segspeed.Table, stop int32, b boardVehicle, now, leave time.Time) (StopArrival, bool) {
+func liveArrival(f *gtfs.Feed, tab *segspeed.Table, roads *livespeed.Grid, stop int32, b boardVehicle, now, leave time.Time) (StopArrival, bool) {
 	p, r := b.pos, b.r
 	if !p.ok {
 		return StopArrival{}, false
@@ -359,7 +369,11 @@ func liveArrival(f *gtfs.Feed, tab *segspeed.Table, stop int32, b boardVehicle, 
 	} else if p.waiting {
 		return StopArrival{}, false // departure unknown
 	}
-	secs := boardTravel(f, p.g, f.ShapeID(t), tab, segspeed.Slot(start, gtfs.Athens), timetable, from, p.g.StopAlong[j])
+	own := p.speed
+	if p.waiting {
+		own = nil // leaves at its departure: how it stands now says nothing
+	}
+	secs := boardTravel(f, p.g, f.ShapeID(t), tab, roads, now.Unix(), segspeed.Slot(start, gtfs.Athens), timetable, from, p.g.StopAlong[j], own)
 	row.At = max(start.Unix()+int64(math.Round(secs)), now.Unix())
 	return row, true
 }
@@ -373,25 +387,54 @@ func maxTime(a, b time.Time) time.Time {
 
 // boardTravel is the seconds to drive from `from` to `to` along g: per 200 m bin of the shape
 // the typical speed where the history has one (a FromShape geometry; at least boardMinBinMS),
-// elsewhere the timetable's running time over that stretch (trip, nil for none), or
-// boardDefaultMS. Waits at stops and lights are in both.
-func boardTravel(f *gtfs.Feed, g *geo.Geometry, shape string, tab *segspeed.Table, slot int, trip *gtfs.Trip, from, to float64) float64 {
+// blended with today's traffic on that road where buses of any line crossed it in the last
+// minutes (roads, as a bus's path_speeds: livespeed.LiveWeight of the live speed), elsewhere
+// the timetable's running time over that stretch (trip, nil for none), or boardDefaultMS.
+// Waits at stops and lights are in both. now is for the live speeds' window. own, when known,
+// is the bus's own speed now: over the first boardOwnM it counts, wholly at the bus and fading
+// to the road's speed (a bus in a jam is late for the next stops whatever the road usually
+// does); a standing bus (under boardOwnMinMS) adds boardStandS instead.
+func boardTravel(f *gtfs.Feed, g *geo.Geometry, shape string, tab *segspeed.Table, roads *livespeed.Grid, now int64, slot int, trip *gtfs.Trip, from, to float64, own *float64) float64 {
 	if !g.FromShape {
-		tab = nil
+		tab, roads = nil, nil
 	}
 	if trip != nil && f.NumStops(trip) < 2 {
 		trip = nil
 	}
 	secs := 0.0
+	if own != nil && *own < boardOwnMinMS {
+		secs += boardStandS
+		own = nil
+	}
+	// The road's speed over [x, end): live and typical, else the timetable, else the default.
+	roadSecs := func(x, end float64) float64 {
+		bin := int(math.Floor(x / segspeed.BinM))
+		var typical *float64
+		if v, ok := tab.Speed(shape, bin, slot); ok {
+			v = max(v, boardMinBinMS)
+			typical = &v
+		}
+		if v, ok := roads.Over(g.Line, x, end, typical, now); ok {
+			return (end - x) / max(v, boardMinBinMS)
+		} else if typical != nil {
+			return (end - x) / *typical
+		} else if trip != nil {
+			return schedAt(f, g, trip, end, end == to) - schedAt(f, g, trip, x, false)
+		}
+		return (end - x) / boardDefaultMS
+	}
 	for x := from; x < to; {
 		bin := int(math.Floor(x / segspeed.BinM))
 		end := min(to, float64(bin+1)*segspeed.BinM)
-		if v, ok := tab.Speed(shape, bin, slot); ok {
+		if own != nil && x-from < boardOwnM {
+			// In pieces: the share of its own speed falls with the distance from the bus.
+			end = min(end, x+boardPieceM, from+boardOwnM)
+			road := (end - x) / max(roadSecs(x, end), 1e-9)
+			w := 1 - ((x+end)/2-from)/boardOwnM
+			v := w*max(*own, boardMinBinMS) + (1-w)*road
 			secs += (end - x) / max(v, boardMinBinMS)
-		} else if trip != nil {
-			secs += schedAt(f, g, trip, end, end == to) - schedAt(f, g, trip, x, false)
 		} else {
-			secs += (end - x) / boardDefaultMS
+			secs += roadSecs(x, end)
 		}
 		x = end
 	}
