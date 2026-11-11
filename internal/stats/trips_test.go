@@ -122,9 +122,9 @@ func TestComputeCountsTripsByCoverage(t *testing.T) {
 		t.Fatalf("fixes = %d, files = %d", d.Fixes, d.Files)
 	}
 	want := &Trips{GTFS: "g", GTFSExpired: true, ScheduleSource: SourceGTFS, MinCoverage: MinCoverage,
-		TripCount: TripCount{Planned: 5, Run: 1, Partial: 1, Missed: 2, Unmeasured: 1, Vanished: 1},
+		TripCount: TripCount{Planned: 5, Run: 1, Partial: 1, Missed: 2, Unmeasured: 1},
 		ByLine: []TripLine{
-			{Line: "L", ScheduleSource: SourceGTFS, TripCount: TripCount{Planned: 4, Run: 1, Partial: 1, Missed: 1, Unmeasured: 1, Vanished: 1}, MissedTrips: []string{"C"}},
+			{Line: "L", ScheduleSource: SourceGTFS, TripCount: TripCount{Planned: 4, Run: 1, Partial: 1, Missed: 1, Unmeasured: 1}, MissedTrips: []string{"C"}},
 			{Line: "M", ScheduleSource: SourceGTFS, TripCount: TripCount{Planned: 1, Missed: 1}, MissedTrips: []string{"E"}},
 		}}
 	if !reflect.DeepEqual(d.Trips, want) {

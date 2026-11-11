@@ -230,6 +230,29 @@ func TestRunRetriesAfterAReadError(t *testing.T) {
 	}
 }
 
+// The archives of one hour (hour.csv.gz, then hour.1.csv.gz, ... after a restart) are read in the
+// order they were written, so each vehicle's rows stay in time order.
+func TestInputsListsTheArchivesOfAnHourInOrder(t *testing.T) {
+	dir := t.TempDir()
+	h := hourName(local(2026, 10, 6, 12, 0, 0))
+	next := hourName(local(2026, 10, 6, 13, 0, 0))
+	for _, n := range []string{h + ".10.csv.gz", h + ".1.csv.gz", next + ".csv.gz", h + ".csv.gz", h + ".2.csv.gz"} {
+		os.WriteFile(filepath.Join(dir, n), nil, 0o644)
+	}
+	files, _, err := Inputs(dir, "2026-10-06", athens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range files {
+		got = append(got, filepath.Base(f))
+	}
+	want := []string{h + ".csv.gz", h + ".1.csv.gz", h + ".2.csv.gz", h + ".10.csv.gz", next + ".csv.gz"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("files = %v", got)
+	}
+}
+
 func TestInputsWaitsForOpenFiles(t *testing.T) {
 	dir := t.TempDir()
 	t0 := local(2026, 10, 6, 12, 0, 0)

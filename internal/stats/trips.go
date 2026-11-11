@@ -31,9 +31,11 @@ const (
 	// while each fix is less than TripSlack after the previous one and not more than RunBack of
 	// the route behind it. A run with at least 2 measured fixes that starts in the day, ends at a
 	// share of its shape of CutLow or more, and never reached CutHigh was cut:
-	//   - vanished: the vehicle's next fix comes VanishGap or more later, or never;
-	//   - short-turn: the next fix comes sooner, on the same line (the other direction, or back at
-	//     the start of the same direction). A next fix on another line counts as neither.
+	//   - vanished: the vehicle's next fix comes VanishGap or more later, or never. Any row of the
+	//     vehicle is a fix here, matched or not, with a position or not;
+	//   - short-turn: the next fix comes sooner, and the next matched fix with a position is on
+	//     the same line (the other direction, or back at the start of the same direction). Sooner
+	//     but on another line, or never matched again, counts as neither.
 	// A gap shorter than TripSlack after which the bus goes on along the same run is no cut.
 	CutLow    = 0.1
 	CutHigh   = 0.9
@@ -214,6 +216,7 @@ type tripCounter struct {
 type cutRun struct {
 	key, line   string
 	first, last int64
+	after       int64   // the vehicle's first row after last, matched or not (0: none yet)
 	at, hi      float64 // share of the shape at the last fix, and the most it reached
 	fixes       int
 }
@@ -355,7 +358,7 @@ func (c *tripCounter) cut(t int64, veh, trip string, sm float64) {
 		return // a copy of an older row (history writes each vehicle in time order)
 	}
 	if r != nil && r.key == key && t-r.last < int64(TripSlack/time.Second) && share >= r.at-RunBack {
-		r.last, r.at, r.hi = t, share, max(r.hi, share)
+		r.last, r.at, r.hi, r.after = t, share, max(r.hi, share), 0
 		r.fixes++
 		return
 	}
@@ -363,6 +366,13 @@ func (c *tripCounter) cut(t int64, veh, trip string, sm float64) {
 		c.endRun(r, t, line)
 	}
 	c.runs[veh] = &cutRun{key: key, line: line, first: t, last: t, at: share, hi: share, fixes: 1}
+}
+
+// fix notes a row of vehicle veh at time t, matched or not: it was not silent (CutLow).
+func (c *tripCounter) fix(t int64, veh string) {
+	if r := c.runs[veh]; r != nil && t > r.last && r.after == 0 {
+		r.after = t
+	}
 }
 
 // endRun counts run r as cut (CutLow) when it was; next is the vehicle's next fix (0: none) and
@@ -376,8 +386,12 @@ func (c *tripCounter) endRun(r *cutRun, next int64, nextLine string) {
 		n = &TripCount{}
 		c.cuts[r.line] = n
 	}
+	heard := next
+	if r.after != 0 {
+		heard = r.after
+	}
 	switch {
-	case next == 0 || next-r.last >= int64(VanishGap/time.Second):
+	case heard == 0 || heard-r.last >= int64(VanishGap/time.Second):
 		n.Vanished++
 	case nextLine == r.line:
 		n.ShortTurn++

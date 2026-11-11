@@ -70,6 +70,20 @@ func TestVanishedIsABusSilentMidRoute(t *testing.T) {
 	}
 }
 
+// A bus that goes on reporting without a match (or without a position) has not vanished.
+func TestUnmatchedFixesAreNoSilence(t *testing.T) {
+	at := func(h, m int) time.Time { return local(2026, 10, 6, h, m, 0) }
+	got := cutsDay(t,
+		vrow(at(8, 0), "L", "a", "G", 200, "g"), vrow(at(8, 10), "L", "a", "G", 1500, "g"),
+		vrow(at(8, 20), "L", "a", "G", 2000, "g"),
+		vrow(at(8, 25), "L", "a", "", -1, "g"), vrow(at(8, 32), "L", "a", "G", -1, "g"),
+		vrow(at(8, 50), "L", "a", "C", 2000, "g"), vrow(at(9, 5), "L", "a", "C", 3950, "g"),
+	)
+	if cuts(got["L"]) != [2]int{1, 0} {
+		t.Fatalf("L = %+v", got["L"])
+	}
+}
+
 // A GPS gap shorter than TripSlack, after which the bus goes on along the same run, cuts nothing;
 // neither does a matcher switch between the trips of one daily direction (#131), a run that
 // reaches the last 10% of its shape, nor a run seen at one fix only.
