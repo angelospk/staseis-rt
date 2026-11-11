@@ -155,6 +155,7 @@ func ComputeFiltered(date string, loc *time.Location, files []string, now time.T
 	delays := newDelayCounter(start.Unix(), end.Unix())
 	if plan != nil {
 		trips = newTripCounter(plan)
+		trips.from, trips.to = start.Unix(), end.Unix()
 	}
 	strs := map[string]string{}
 	for _, file := range files {

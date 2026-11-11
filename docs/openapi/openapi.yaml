@@ -2379,6 +2379,8 @@ components:
             partial: {type: integer, description: "Seen, but covered less."}
             missed: {type: integer, description: Never seen.}
             unmeasured: {type: integer, description: No usable shape.}
+            short_turn: {type: integer, description: "Bus runs left mid-route for the other direction or the start (contract rev 23); missing on older days."}
+            vanished: {type: integer, description: "Bus runs that stopped reporting mid-route for 15 min or more (contract rev 23); missing on older days."}
             by_line:
               type: array
               description: Every line with a planned trip, by id.
@@ -2393,6 +2395,8 @@ components:
                   partial: {type: integer}
                   missed: {type: integer}
                   unmeasured: {type: integer}
+                  short_turn: {type: integer}
+                  vanished: {type: integer}
                   missed_trips:
                     type: [array, "null"]
                     description: "Never seen, by start time: GTFS trip_ids (gtfs), or `go HH:MM` / `come HH:MM` runs (oasa_daily)."
