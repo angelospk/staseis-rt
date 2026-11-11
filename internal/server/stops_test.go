@@ -313,3 +313,24 @@ func TestStopBoardScheduleAcrossMidnight(t *testing.T) {
 		t.Fatalf("arrivals %s", asJSON(sr.Arrivals))
 	}
 }
+
+// After a restart a line polled now has no poll yet: the board says so (warming, short cache)
+// instead of passing an empty board off as no bus coming (#130).
+func TestStopBoardWarmingUntilLinesArePolled(t *testing.T) {
+	a := newApp(t, monday1020)
+	sr, ma := stopBody(t, a, "S3")
+	if !sr.Warming || ma != minMaxAge {
+		t.Fatalf("before the first poll: warming %v, max-age %d", sr.Warming, ma)
+	}
+	poll(a, monday1020)
+	sr, ma = stopBody(t, a, "S3")
+	if sr.Warming || ma != stopMaxAge {
+		t.Fatalf("after the poll: warming %v, max-age %d", sr.Warming, ma)
+	}
+	a.mu.Lock()
+	a.warming["L"] = true // its route codes are not known yet
+	a.mu.Unlock()
+	if sr, _ = stopBody(t, a, "S3"); !sr.Warming {
+		t.Fatal("a line whose routes are not known yet must make the board warming")
+	}
+}

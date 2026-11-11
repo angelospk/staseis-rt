@@ -657,7 +657,7 @@ paths:
 
         Raises the polling priority of the stop's lines that have a live bus in `arrivals`, as
         a line request does; a line with none keeps its usual rate. No OASA request of its own.
-        `Cache-Control: public, max-age=15`.
+        `Cache-Control: public, max-age=15` (`5` while `warming`).
       parameters:
         - name: stop_id
           in: path
@@ -2641,6 +2641,12 @@ components:
             `usual` but with `line` as in `arrivals`. `[]` while the server has no history.
           items:
             $ref: "#/components/schemas/Usual"
+        warming:
+          type: boolean
+          description: |
+            Contract rev 22: `true` while a line in `lines` is polled now but has no poll yet
+            (after a restart): its buses are missing from `arrivals`, so an empty board does not
+            mean no bus is coming. Then `max-age=5`.
         updated_at: {type: integer}
 
     StopPredictions:

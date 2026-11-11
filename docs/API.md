@@ -150,6 +150,8 @@ there and `arrivals`, soonest first, up to 60 min ahead, at most 3 per line and 
 
 The request raises the polling priority of the stop's lines that have a live bus in
 `arrivals`; a line with none keeps its usual rate. No OASA request of its own. Cached 15 s.
+`warming` (rev 22) is `true` while a line of the stop is polled now but has no poll yet (after a
+restart): an empty `arrivals` then does not mean no bus is coming; cached 5 s.
 Full rules: [`CONTRACT.md`](CONTRACT.md#get-v1stopsstop_id-rev-8).
 
 ```bash
