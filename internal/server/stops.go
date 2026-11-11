@@ -181,6 +181,9 @@ func (a *App) handleStop(w http.ResponseWriter, r *http.Request) {
 	if lines == nil {
 		lines = []string{}
 	}
+	// Before the board: a first poll published in between then shows its buses with warming
+	// still true (cached 5 s), never an empty board with warming false (cached 15 s).
+	warming := a.boardWarming(wd, lines)
 	arr := a.stopBoard(wd, s, lines, now)
 	// Only the lines with a bus on the way are asked of OASA more often: a big stop has 16 lines.
 	seen := map[string]bool{}
@@ -190,7 +193,6 @@ func (a *App) handleStop(w http.ResponseWriter, r *http.Request) {
 			a.sched.Watch(x.Line)
 		}
 	}
-	warming := a.boardWarming(wd, lines)
 	ma := stopMaxAge
 	if warming {
 		ma = minMaxAge
