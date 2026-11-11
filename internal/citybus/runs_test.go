@@ -714,3 +714,21 @@ func TestServiceStopSavesRunsAndHistory(t *testing.T) {
 		t.Fatalf("the queued history row is written on a stop: %v", rows)
 	}
 }
+
+// A bus going against its route is not on its run: it does not move its Last on (#147, review).
+func TestNoteSkipsABusAgainstItsRoute(t *testing.T) {
+	m := buildModel(runRaw(2))
+	base, _, _ := dayBase("2026-11-10")
+	code := codeOf("2026-11-10", "10", t1720)
+	l := loadRuns(filepath.Join(t.TempDir(), "runs.json"), base)
+	at := base + t1720 + 300
+	l.note(m, seenAt(t, m, code, "25.125", at))
+	s := seenAt(t, m, code, "25.115", at+60)
+	s.Against = true
+	if l.note(m, s) {
+		t.Fatal("a sighting against the route counts on no run")
+	}
+	if r := l.seen("2026-11-10", "10", t1720); r == nil || r.Last != at {
+		t.Fatalf("Last stays: %+v", r)
+	}
+}
