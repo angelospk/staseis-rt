@@ -89,7 +89,7 @@ func (c *City) v2Vehicle(p Placed) obj {
 	mo := motionObj(motion(&p))
 	mo["path_speeds"], mo["knots"] = nil, nil
 	var run any
-	if t, date, _ := c.runOfRoute(p.Route, p.S.ID); t != nil {
+	if t, date, _ := c.runOfRoute(p.Route, p.S); t != nil {
 		run = c.Conf.ID + ":run:" + t.ID + ":" + date
 	}
 	return obj{"id": c.lid(p.S.ID), "line": c.lid(p.Route.Line), "run": run, "mode": "bus", "headsign": p.Route.Name, "label": nil,
@@ -110,11 +110,11 @@ func v1Vehicle(p Placed, full bool) obj {
 	return o
 }
 
-// runOfRoute: the trip a vehicle code names on this route (nil when the code names no run or no
+// runOfRoute: the trip of a sighting on this route (runOf; nil when it has no run or no
 // trip of the route leaves then), the code's service date, and its label: "HH:MM FIRST → LAST",
 // where the stops are the trip's first and last timed stops, or the route's ends without a trip.
-func (c *City) runOfRoute(r *Route, code string) (*Trip, string, string) {
-	date, dep, ok := runCode(code)
+func (c *City) runOfRoute(r *Route, s Sighting) (*Trip, string, string) {
+	date, dep, ok := runOf(r, s)
 	if !ok {
 		return nil, "", ""
 	}
@@ -291,7 +291,7 @@ func (c *City) v1Line(code string) obj {
 	for _, p := range c.live.placed(now, code) {
 		o := v1Vehicle(p, true)
 		var tripID, label any
-		if t, _, l := c.runOfRoute(p.Route, p.S.ID); t != nil {
+		if t, _, l := c.runOfRoute(p.Route, p.S); t != nil {
 			tripID, label = t.ID, l
 		} else if l != "" {
 			label = l

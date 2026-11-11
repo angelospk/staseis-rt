@@ -168,7 +168,7 @@ func TestNoteLeavesOutWhatIsNoRunYet(t *testing.T) {
 		{"180 m past the first stop", code, "25.102", base + t1720 + 60, true},
 		{"45 min after the end of the run (17:26)", code, "25.125", base + t1720 + 360 + 2700, true},
 		{"46 min after the end of the run", code, "25.125", base + t1720 + 360 + 2760, false},
-		{"a device id", "1607413212998552622", "25.115", base + t1720 + 300, false},
+		{"a device id with no trip in time (17:23 there, 18:00 now)", "1607413212998552622", "25.115", base + 18*3600, false},
 		{"a code time that is no trip (Heraklion 16:33)", codeOf("2026-11-10", "10", 16*3600+33*60), "25.115", base + 16*3600 + 40*60, false},
 		{"the same time on another weekday", codeOf("2026-11-11", "10", t1720), "25.115", base + 86400 + t1720 + 300, false},
 	} {
@@ -462,10 +462,11 @@ func TestVehicleCarriesItsRun(t *testing.T) {
 	if v := by2["t:"+extra]; v["run"] != nil {
 		t.Fatalf("v2 extra: %v", v["run"])
 	}
-	if v := by1[dev]; v["trip_id"] != nil || v["trip_label"] != nil {
-		t.Fatalf("a device id has no run: %v %v", v["trip_id"], v["trip_label"])
+	// A device id gets its run from the timetable: the 17:20 is due where it is now (#149).
+	if v := by1[dev]; v["trip_id"] != "7" || v["trip_label"] != "17:20 SA → SD" {
+		t.Fatalf("a device id in time: %v %v", v["trip_id"], v["trip_label"])
 	}
-	if v := by2["t:"+dev]; v["run"] != nil {
+	if v := by2["t:"+dev]; v["run"] != "t:run:7:"+today {
 		t.Fatalf("v2 device: %v", v["run"])
 	}
 }
@@ -570,7 +571,7 @@ func TestHistoryOneRowPerMoveOrMinute(t *testing.T) {
 	// fix_t,line,route_code,veh,lat,lon,gtfs,trip_id,shape_id,s_m,delay_s,run_start,start_delay_s
 	want := map[string]bool{
 		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25115000,%s,7,,%d,,,", t0, run, ver, m115):    true,
-		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25128000,%s,,,%d,,,", t0, dev, ver, m128):     true,
+		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25128000,%s,7,,%d,,,", t0, dev, ver, m128):    true, // run by time (#149)
 		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25115000,%s,7,,%d,,,", t0+60, run, ver, m115): true,
 		fmt.Sprintf("%d,t:1,10,t:%s,35300000,25116000,%s,7,,%d,,,", t0+70, run, ver, m116): true,
 	}
@@ -730,5 +731,91 @@ func TestNoteSkipsABusAgainstItsRoute(t *testing.T) {
 	}
 	if r := l.seen("2026-11-10", "10", t1720); r == nil || r.Last != at {
 		t.Fatalf("Last stays: %+v", r)
+	}
+}
+
+// ---- a run from the timetable, for a bus whose code is a device id (#149) ----
+
+const devID = "1607650707510153454"
+
+// devAt: the sighting of a device-id bus of route 10 at lon, on the board of D at unix at.
+func devAt(t *testing.T, m *Model, lon string, at int64) Sighting {
+	t.Helper()
+	return seenAt(t, m, devID, lon, at)
+}
+
+// The one trip whose time where the bus is lies 3 min early to 10 min late is its run.
+func TestTimeRunNamesTheOneTripInTime(t *testing.T) {
+	m := buildModel(runRaw(2))
+	r := m.Routes["10"]
+	base, _, _ := dayBase("2026-11-10")
+	s := devAt(t, m, "25.115", base+t1720+300) // ~1361 m, due there 17:23; seen 17:25
+	date, dep, ok := runOf(r, s)
+	if !ok || date != "2026-11-10" || dep != t1720 {
+		t.Fatalf("run %s %d %v, want the 17:20", date, dep, ok)
+	}
+	l := loadRuns(filepath.Join(t.TempDir(), "runs.json"), base)
+	if !l.note(m, s) || l.seen("2026-11-10", "10", t1720) == nil {
+		t.Fatal("a device-id bus on its run by time counts on it")
+	}
+}
+
+// No run by time: near the start, too early or late, two trips in time, against its route.
+func TestTimeRunOnlyWhenSure(t *testing.T) {
+	raw := runRaw(2)
+	base, _, _ := dayBase("2026-11-10")
+	for _, c := range []struct {
+		name, lon string
+		at        int64
+		extra     bool
+		against   bool
+	}{
+		{"within 300 m of the start", "25.102", base + t1720 + 60, false, false},
+		{"17 min late", "25.115", base + t1720 + 20*60, false, false},
+		{"5 min early", "25.115", base + t1720 - 120, false, false},
+		{"a second trip 5 min later is in time too", "25.115", base + t1720 + 300, true, false},
+		{"against its route", "25.115", base + t1720 + 300, false, true},
+	} {
+		rw := runRaw(2)
+		if c.extra {
+			for i, st := range []string{"A", "B", "C", "D"} {
+				rw.Trips["10"] = append(rw.Trips["10"], RawTripRow{ID: 9, Day: 2, RouteCode: "10", StopCode: st, TripTime: fmt.Sprintf("17:%02d", 25+2*i)})
+			}
+		} else {
+			rw = raw
+		}
+		m := buildModel(rw)
+		s := devAt(t, m, c.lon, c.at)
+		s.Against = c.against
+		if _, _, ok := runOf(m.Routes["10"], s); ok {
+			t.Fatalf("%s: no run", c.name)
+		}
+	}
+}
+
+// A code that names a run wins over the time.
+func TestTimeRunNotForACodedBus(t *testing.T) {
+	m := buildModel(runRaw(2))
+	base, _, _ := dayBase("2026-11-10")
+	s := seenAt(t, m, codeOf("2026-11-10", "10", t1840), "25.115", base+t1720+300)
+	if _, dep, ok := runOf(m.Routes["10"], s); !ok || dep != t1840 {
+		t.Fatalf("the code's 18:40, not the time's 17:20: %d %v", dep, ok)
+	}
+}
+
+// schedAt: the departure before the first timed stop, linear between them, the last time after.
+func TestSchedAt(t *testing.T) {
+	r := buildModel(runRaw(2)).Routes["10"]
+	tr := tripOf(r, 2, t1720)
+	for _, c := range []struct {
+		m    float64
+		want int
+	}{{-50, t1720}, {0, t1720}, {r.StopM[1] / 2, t1720 + 60}, {r.StopM[3], t1720 + 360}, {r.StopM[4], t1720 + 360}} {
+		if at, dep, ok := schedAt(r, tr, c.m); !ok || at != c.want || dep != t1720 {
+			t.Errorf("m %.0f: %d %d %v, want %d", c.m, at, dep, ok, c.want)
+		}
+	}
+	if _, _, ok := schedAt(r, &Trip{Times: []int{NoTime, NoTime}}, 10); ok {
+		t.Error("a trip with no time")
 	}
 }
