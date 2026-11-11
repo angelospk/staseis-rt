@@ -1063,3 +1063,34 @@ func TestEstimatesSkipABusAgainstItsRoute(t *testing.T) {
 		t.Fatalf("C is not ahead of a bus going the other way: %+v", a)
 	}
 }
+
+// A bus against its route stays so when the same GPS point comes again (another board, the same
+// time or later); real progress along the route ends it (#147, review).
+func TestLiveCityAgainstStaysUntilTheBusGoesOn(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	at := func(ts int64, lon string) {
+		l.add(Board{Stop: "D", At: ts, Rows: []LiveRow{row("10", "35.3", lon, 2, "v")}})
+	}
+	at(1000, "25.118") // ~1634 m
+	at(1010, "25.116") // ~1452 m: against
+	at(1020, "25.116") // the same point again
+	if s := l.Buses["v"]; !s.Against || s.Speed != nil {
+		t.Fatalf("the same point keeps it against: %+v", s)
+	}
+	at(1030, "25.118") // ~180 m on along the route
+	if s := l.Buses["v"]; s.Against {
+		t.Fatal("going on along the route ends it")
+	}
+}
+
+// A last sighting older than MaxAge is gone: it sets neither the pass nor against (#147, review).
+func TestLiveCityOldSightingSetsNothing(t *testing.T) {
+	m := buildModel(lineRaw())
+	l := newLiveCity(m)
+	l.add(Board{Stop: "D", At: 1000, Rows: []LiveRow{row("10", "35.3", "25.118", 2, "v")}})
+	l.add(Board{Stop: "D", At: 1000 + MaxAge + 1, Rows: []LiveRow{row("10", "35.3", "25.116", 2, "v")}})
+	if l.Buses["v"].Against {
+		t.Fatal("a sighting older than MaxAge does not make the bus against its route")
+	}
+}

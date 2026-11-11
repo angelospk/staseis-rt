@@ -119,7 +119,7 @@ func (l *runLog) dropBefore(date string) {
 // counts on no run). It returns true when the sighting counted.
 func (l *runLog) note(m *Model, s Sighting) bool {
 	route := m.Routes[s.Route]
-	if route == nil {
+	if route == nil || s.Against { // a bus against its route is not on its run (#147)
 		return false
 	}
 	date, dep, ok := runCode(s.ID)

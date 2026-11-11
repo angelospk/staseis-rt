@@ -47,7 +47,7 @@ func sightingsAfter(m *Model, b Board, prev map[string]Sighting) []Sighting {
 		// With a last sighting on this route, only passes from there on to as far as the bus can
 		// have gone (15 m/s) count first.
 		old, seen := prev[r.VehicleCode]
-		seen = seen && old.Route == r.RouteCode && b.At >= old.Seen
+		seen = seen && old.Route == r.RouteCode && b.At >= old.Seen && b.At-old.Seen <= MaxAge
 		lo, hi := math.Inf(-1), math.Inf(1)
 		if seen {
 			lo, hi = old.M-againstSlack, old.M+15*math.Max(float64(b.At-old.Seen), 10)+100
@@ -83,7 +83,9 @@ func sightingsAfter(m *Model, b Board, prev map[string]Sighting) []Sighting {
 		if widx >= 0 {
 			p, idx = wp, widx
 		}
-		against := seen && !ahead && p.M > newTripM
+		// Against stays so until the bus goes on along the route: the same GPS point seen again
+		// (another board) is no progress.
+		against := seen && p.M > newTripM && (!ahead || (old.Against && p.M < old.M+againstSlack))
 		toM := route.StopM[idx]
 		eta := b.At + int64(t)
 		left := math.Max(0, toM-p.M)
