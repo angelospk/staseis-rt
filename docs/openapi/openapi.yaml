@@ -2456,6 +2456,60 @@ components:
                   ewt_min: {type: number, description: "Excess wait, minutes: wait_min - mean/2."}
                   off_headway_share: {type: number, description: "Share of headways with |h - mean| > mean/2 (bunched or a gap). Missing on days written before 2026-11-13."}
                   los: {type: string, enum: [A, B, C, D, E, F], description: "TCQSM headway-adherence LOS of cv_h."}
+        frequency:
+          type: object
+          description: |
+            citybus.gr cities only: the scheduled frequency of each line and direction, from the
+            timetable (TCQSM 4th ed., Exhibit 5-6). Departures from 07:00 to before 21:00 local; a
+            direction with fewer than min_trips is left out. Missing when no direction qualifies.
+          required: [from_h, to_h, min_trips, by_line]
+          properties:
+            from_h: {type: integer}
+            to_h: {type: integer}
+            min_trips: {type: integer, description: "Fewest daytime departures for a frequency (4)."}
+            by_line:
+              type: array
+              items:
+                type: object
+                required: [line, dir, trips, headway_min, band]
+                properties:
+                  line: {type: string}
+                  dir: {type: integer, description: "0 or 1 (citybus.gr direction 1 or 2)."}
+                  trips: {type: integer, description: Departures in the window (route variants together; one per minute).}
+                  headway_min: {type: number, description: "Mean scheduled headway, minutes: (last - first) / (trips - 1)."}
+                  band: {type: string, enum: ["<=5", "6-10", "11-15", "16-30", "31-59", "60", ">60"], description: "TCQSM band of headway_min rounded to whole minutes."}
+        origin_otp:
+          type: object
+          description: |
+            citybus.gr cities only: on-time performance at the route origin (TCQSM 4th ed., Exhibit
+            5-8). A run is a vehicle code with its scheduled departure; it left when it crossed shape
+            metre at_m, interpolated between two sightings at most max_gap_s apart. On time is 0 to
+            late_s seconds late; early is not on time. Missing when no run of the day was seen.
+          required: [at_m, max_gap_s, late_s, runs, measured, on_time, early, late, by_line]
+          properties:
+            at_m: {type: integer}
+            max_gap_s: {type: integer}
+            late_s: {type: integer}
+            runs: {type: integer, description: "Runs seen, measured or not."}
+            measured: {type: integer, description: "on_time + early + late."}
+            on_time: {type: integer}
+            early: {type: integer}
+            late: {type: integer}
+            share: {type: number, description: "on_time / measured. Missing when nothing was measured."}
+            band: {type: string, enum: ["95-100", "90-94", "80-89", "70-79", "<70"], description: "TCQSM band of share (whole percent, rounded down). Missing with share."}
+            by_line:
+              type: array
+              items:
+                type: object
+                required: [line, runs, measured, on_time, early, late]
+                properties:
+                  line: {type: string}
+                  runs: {type: integer}
+                  measured: {type: integer}
+                  on_time: {type: integer}
+                  early: {type: integer}
+                  late: {type: integer}
+                  share: {type: number, description: "Missing when nothing was measured."}
 
     StaticLines:
       type: object

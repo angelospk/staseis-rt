@@ -77,6 +77,12 @@ type Day struct {
 	// Headways: regularity of the high-frequency lines of OASA's daily schedule; absent when no
 	// direction qualifies.
 	Headways *Headways `json:"headways,omitempty"`
+	// Frequency: the scheduled frequency band of each line and direction; only a plan that opts
+	// in (a citybus.gr city), absent when no direction has enough daytime departures.
+	Frequency *Frequency `json:"frequency,omitempty"`
+	// OriginOTP: on-time performance at the route origin; only a plan that opts in (a citybus.gr
+	// city), absent when no run was seen.
+	OriginOTP *OriginOTP `json:"origin_otp,omitempty"`
 }
 
 type Index struct {
@@ -155,13 +161,17 @@ func ComputeFiltered(date string, loc *time.Location, files []string, now time.T
 	}
 	var recs []rec
 	var trips *tripCounter
+	var otp *otpCounter
 	delays := newDelayCounter(start.Unix(), end.Unix())
 	if plan != nil {
 		trips = newTripCounter(plan)
+		if plan.RunDeparture != nil {
+			otp = newOTPCounter(plan.RunDeparture, start.Unix(), end.Unix())
+		}
 	}
 	strs := map[string]string{}
 	for _, file := range files {
-		if recs, err = readFile(file, start.Unix(), end.Unix(), recs, strs, trips, delays, f); err != nil {
+		if recs, err = readFile(file, start.Unix(), end.Unix(), recs, strs, trips, delays, otp, f); err != nil {
 			return nil, fmt.Errorf("%s: %w", filepath.Base(file), err)
 		}
 	}
@@ -188,6 +198,12 @@ func ComputeFiltered(date string, loc *time.Location, files []string, now time.T
 	if trips != nil {
 		day.Trips = trips.result(loc)
 		day.Headways = trips.headways(start, loc)
+		if plan.Frequency {
+			day.Frequency = frequency(plan, start, loc)
+		}
+	}
+	if otp != nil {
+		day.OriginOTP = otp.result()
 	}
 	day.StartDelay = delays.result()
 	vehs := map[string]bool{}
@@ -260,9 +276,10 @@ func sample(a, b *rec, movedOnly bool) (dist, secs float64, ok bool) {
 }
 
 // readFile appends the rows of one gzipped history file whose fix time is in [from, to), gives
-// every matched row to trips (when not nil) and every row with a start delay to delays. Rows f
-// leaves out count nowhere. Strings repeat a lot: strs interns them.
-func readFile(path string, from, to int64, recs []rec, strs map[string]string, trips *tripCounter, delays *delayCounter, f Filter) ([]rec, error) {
+// every matched row to trips (when not nil), every row with a start delay to delays and every
+// row to otp (when not nil). Rows f leaves out count nowhere. Strings repeat a lot: strs interns
+// them.
+func readFile(path string, from, to int64, recs []rec, strs map[string]string, trips *tripCounter, delays *delayCounter, otp *otpCounter, f Filter) ([]rec, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return recs, err
@@ -323,14 +340,17 @@ func readFile(path string, from, to int64, recs []rec, strs map[string]string, t
 		if gtfsCol >= 0 {
 			g = row[gtfsCol]
 		}
-		if trips != nil && tripCol >= 0 && row[tripCol] != "" {
-			sm := int64(-1)
-			if smCol >= 0 {
-				if v, err := strconv.ParseInt(row[smCol], 10, 64); err == nil {
-					sm = v
-				}
+		sm := int64(-1)
+		if smCol >= 0 {
+			if v, err := strconv.ParseInt(row[smCol], 10, 64); err == nil {
+				sm = v
 			}
+		}
+		if trips != nil && tripCol >= 0 && row[tripCol] != "" {
 			trips.add(t, intern(row[col["veh"]]), intern(row[tripCol]), g, float64(sm))
+		}
+		if otp != nil {
+			otp.add(intern(row[col["line"]]), intern(row[col["veh"]]), t, float64(sm))
 		}
 		if runCol >= 0 && startCol >= 0 && row[runCol] != "" {
 			run, err1 := strconv.ParseInt(row[runCol], 10, 64)
@@ -398,7 +418,7 @@ func RunFiltered(historyDir, out string, loc *time.Location, now time.Time, forc
 			}
 		}
 		day, err := ComputeFiltered(date, loc, files, now, p, f)
-		if err == nil && day.Fixes == 0 {
+		if err == nil && day.Fixes == 0 && day.Frequency == nil { // a timetable-only city keeps its frequency
 			if f.Prefix != "" {
 				if err := os.WriteFile(none, nil, 0o644); err != nil {
 					errs = append(errs, fmt.Errorf("stats %s: %w", date, err))

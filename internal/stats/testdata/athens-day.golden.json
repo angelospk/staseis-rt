@@ -1,0 +1,286 @@
+{
+ "version": 1,
+ "date": "2026-10-06",
+ "tz": "Europe/Athens",
+ "generated_at": 0,
+ "first_fix": 1791270010,
+ "last_fix": 1791273000,
+ "files": 1,
+ "fixes": 6,
+ "vehicles": 2,
+ "lines": 2,
+ "hours": [
+  {
+   "h": 0,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 1,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 2,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 3,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 4,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 5,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 6,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 7,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 8,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 9,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 10,
+   "fixes": 6,
+   "vehicles": 2,
+   "lines": 2,
+   "dist_m": 0,
+   "time_s": 80
+  },
+  {
+   "h": 11,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 12,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 13,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 14,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 15,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 16,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 17,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 18,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 19,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 20,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 21,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 22,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 23,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  }
+ ],
+ "by_line": [
+  {
+   "line": "L",
+   "fixes": 3,
+   "vehicles": 1,
+   "dist_m": 0,
+   "time_s": 30
+  },
+  {
+   "line": "M",
+   "fixes": 3,
+   "vehicles": 1,
+   "dist_m": 0,
+   "time_s": 50
+  }
+ ],
+ "trips": {
+  "gtfs": "g",
+  "gtfs_expired": false,
+  "schedule_source": "mixed",
+  "min_coverage": 0.5,
+  "planned": 2,
+  "run": 2,
+  "partial": 0,
+  "missed": 0,
+  "unmeasured": 0,
+  "by_line": [
+   {
+    "line": "L",
+    "schedule_source": "oasa_daily",
+    "planned": 1,
+    "run": 1,
+    "partial": 0,
+    "missed": 0,
+    "unmeasured": 0,
+    "missed_trips": null
+   },
+   {
+    "line": "M",
+    "schedule_source": "gtfs",
+    "planned": 1,
+    "run": 1,
+    "partial": 0,
+    "missed": 0,
+    "unmeasured": 0,
+    "missed_trips": null
+   }
+  ]
+ },
+ "start_delay": {
+  "runs": 2,
+  "by_line": [
+   {
+    "line": "L",
+    "runs": 1,
+    "mean_s": 40,
+    "p90_s": 40,
+    "sum_s": 40,
+    "minutes": [
+     [
+      0,
+      1
+     ]
+    ]
+   },
+   {
+    "line": "M",
+    "runs": 1,
+    "mean_s": 50,
+    "p90_s": 50,
+    "sum_s": 50,
+    "minutes": [
+     [
+      0,
+      1
+     ]
+    ]
+   }
+  ]
+ }
+}
