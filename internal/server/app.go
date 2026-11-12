@@ -81,6 +81,8 @@ type world struct {
 	dirsOnce  sync.Once
 	dirs      map[string]map[int32]int    // line -> shape -> direction (0/1), built on first use
 	qstops    map[[2]int32][]quality.Stop // (shape, pattern) -> stops along it, live quality; guarded by App.matchMu
+	patMu     sync.Mutex
+	patStops  map[string]map[string][]string // line -> shape id -> its Pattern stop ids (live segments)
 }
 
 // lineData is the last published state of one line.

@@ -28,12 +28,11 @@ type Stop struct {
 }
 
 // Fix is one matched position of a vehicle on its trip: S metres along the shape at unix time T.
-// Stops are every stop of the trip's pattern (Pattern, any key that tells the stop lists of one
-// shape apart), by Along.
+// Stops are every stop of the trip's pattern, by Along.
 type Fix struct {
 	Vehicle, Trip  string
 	Line, Headsign string
-	Shape, Pattern string
+	Shape          string
 	Stops          []Stop
 	S              float64
 	T              int64
@@ -91,14 +90,14 @@ type vehicle struct {
 type Tracker struct {
 	mu       sync.Mutex
 	vehicles map[string]*vehicle
-	passes   map[passKey][]pass           // newest last, at most keepPasses
-	segments map[[2]string][]traversal    // (from, to) stop ids -> traversals, by arrival
-	shapes   map[string]map[string][]Stop // shape -> pattern -> its stops, as fixes gave them
+	passes   map[passKey][]pass            // newest last, at most keepPasses
+	segments map[[2]string][]traversal     // (from, to) stop ids -> traversals, by arrival
+	shapes   map[string]map[string]float64 // shape -> stop id -> its place along the shape
 }
 
 func NewTracker() *Tracker {
 	return &Tracker{vehicles: map[string]*vehicle{}, passes: map[passKey][]pass{},
-		segments: map[[2]string][]traversal{}, shapes: map[string]map[string][]Stop{}}
+		segments: map[[2]string][]traversal{}, shapes: map[string]map[string]float64{}}
 }
 
 // Reset forgets everything: a new GTFS feed may reuse trip and shape ids for other geometry.
@@ -106,7 +105,7 @@ func (k *Tracker) Reset() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.vehicles, k.passes = map[string]*vehicle{}, map[passKey][]pass{}
-	k.segments, k.shapes = map[[2]string][]traversal{}, map[string]map[string][]Stop{}
+	k.segments, k.shapes = map[[2]string][]traversal{}, map[string]map[string]float64{}
 }
 
 // Observe adds a fix. A fix that is not newer passes nothing. A fix of a new trip or shape,
@@ -116,10 +115,14 @@ func (k *Tracker) Reset() {
 func (k *Tracker) Observe(f Fix) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if k.shapes[f.Shape] == nil {
-		k.shapes[f.Shape] = map[string][]Stop{}
+	at := k.shapes[f.Shape]
+	if at == nil {
+		at = map[string]float64{}
+		k.shapes[f.Shape] = at
 	}
-	k.shapes[f.Shape][f.Pattern] = f.Stops
+	for _, st := range f.Stops {
+		at[st.ID] = st.Along
+	}
 	v := k.vehicles[f.Vehicle]
 	if v != nil && f.T <= v.t {
 		return
@@ -192,10 +195,13 @@ func (k *Tracker) pass(id string, v *vehicle, i int, p int64) {
 	ps = append(ps, pass{})
 	copy(ps[j+1:], ps[j:])
 	ps[j] = pass{id, p}
-	// A pass that arrived late may sit before a bus whose gap was measured without it.
+	// A pass that arrived late may sit before a bus whose gap at this stop, its last one, was
+	// measured without it (or not at all).
 	if j+1 < len(ps) && ps[j+1].veh != id {
-		if w := k.vehicles[ps[j+1].veh]; w != nil && w.gap != nil && w.gap.Stop == st.ID && w.gap.At == ps[j+1].t {
-			w.gap.GapS = ps[j+1].t - p
+		next := ps[j+1]
+		if w := k.vehicles[next.veh]; w != nil && w.lastIdx >= 0 && w.stops[w.lastIdx].ID == st.ID &&
+			w.lastT == next.t && w.line == v.line && w.headsign == v.headsign && next.t-p <= MaxGapS {
+			w.gap = &Gap{Stop: st.ID, At: next.t, GapS: next.t - p}
 		}
 	}
 	if len(ps) > keepPasses {
@@ -227,44 +233,35 @@ func (k *Tracker) State(vehicle, trip string) (VehicleState, bool) {
 	return st, true
 }
 
-// Segments lists the segments of shape, between stops one after the other in any pattern seen on
-// it, with the traversals by any line that ended in (now − Window, now] over a stop distance
-// within SameRoad of the shape's (the same road), in order along the shape, with their count and
-// median speed.
-func (k *Tracker) Segments(shape string, now int64) []SegmentObs {
+// Segments lists the segments between the stops given (a Pattern of shape, in order) that buses
+// of any line crossed, stopping at both, in (now − Window, now], over a stop distance within
+// SameRoad of the shape's (the same road), with their count and median speed. A stop the tracker
+// has no place for on shape (no fix of a trip with it yet) ends no segment.
+func (k *Tracker) Segments(shape string, stops []string, now int64) []SegmentObs {
 	from := now - int64(Window.Seconds())
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	at := k.shapes[shape]
 	var out []SegmentObs
 	var speeds []float64
-	seen := map[[2]string]bool{}
-	for _, stops := range k.shapes[shape] {
-		for i := 1; i < len(stops); i++ {
-			a, b := stops[i-1], stops[i]
-			key := [2]string{a.ID, b.ID}
-			if seen[key] {
-				continue
+	for i := 1; i < len(stops); i++ {
+		a, okA := at[stops[i-1]]
+		b, okB := at[stops[i]]
+		if !okA || !okB || b <= a {
+			continue
+		}
+		m := b - a
+		speeds = speeds[:0]
+		for _, x := range k.segments[[2]string{stops[i-1], stops[i]}] {
+			if x.end > from && x.end <= now && math.Abs(x.m-m) <= SameRoad*m {
+				speeds = append(speeds, x.speed)
 			}
-			seen[key] = true
-			m := b.Along - a.Along
-			speeds = speeds[:0]
-			for _, x := range k.segments[key] {
-				if x.end > from && x.end <= now && math.Abs(x.m-m) <= SameRoad*m {
-					speeds = append(speeds, x.speed)
-				}
-			}
-			if len(speeds) > 0 {
-				out = append(out, SegmentObs{From: a.ID, To: b.ID, FromAlong: a.Along, ToAlong: b.Along,
-					N: len(speeds), MedianMS: median(speeds)})
-			}
+		}
+		if len(speeds) > 0 {
+			out = append(out, SegmentObs{From: stops[i-1], To: stops[i], FromAlong: a, ToAlong: b,
+				N: len(speeds), MedianMS: median(speeds)})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].FromAlong != out[j].FromAlong {
-			return out[i].FromAlong < out[j].FromAlong
-		}
-		return out[i].ToAlong < out[j].ToAlong
-	})
 	return out
 }
 

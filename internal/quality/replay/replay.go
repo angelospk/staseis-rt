@@ -20,6 +20,7 @@ import (
 	"github.com/angelospk/athens-transit-rt/internal/match"
 	"github.com/angelospk/athens-transit-rt/internal/quality"
 	"github.com/angelospk/athens-transit-rt/internal/segspeed"
+	"github.com/angelospk/athens-transit-rt/internal/staticsite"
 	"github.com/angelospk/athens-transit-rt/internal/usual"
 )
 
@@ -107,12 +108,13 @@ func Run(cfg Config) (*Result, error) {
 		}
 		return quality.Usual{Known: true}
 	}
-	shapes := map[string]bool{}
+	shapes := map[string][]string{} // shape -> its Pattern stop ids, as /v2/lines/{id}
+	lineFiles := map[string]staticsite.LineFile{}
 	nextSeg := cfg.Hour.Add(segmentTick).Unix()
 	rate := func(now int64) {
 		start := time.Now()
-		for id := range shapes {
-			for _, o := range k.Segments(id, now) {
+		for id, pat := range shapes {
+			for _, o := range k.Segments(id, pat, now) {
 				level := quality.Unknown
 				u, ok := tab.Between(id, o.FromAlong, o.ToAlong, segspeed.Slot(time.Unix(now, 0), gtfs.Athens))
 				switch {
@@ -146,6 +148,7 @@ func Run(cfg Config) (*Result, error) {
 		if g == nil || !g.FromShape {
 			continue
 		}
+		line, head := cfg.Feed.Line(t), cfg.Feed.Headsign(t)
 		key := [2]int32{t.Shape, t.Pattern}
 		ss, ok := stops[key]
 		if !ok {
@@ -157,11 +160,14 @@ func Run(cfg Config) (*Result, error) {
 			}
 			stops[key] = ss
 		}
-		shapes[r.shape] = true
-		line, head := cfg.Feed.Line(t), cfg.Feed.Headsign(t)
+		if _, ok := shapes[r.shape]; !ok {
+			if _, ok := lineFiles[line]; !ok {
+				lineFiles[line] = staticsite.LineFileOf(cfg.Feed, line)
+			}
+			shapes[r.shape] = lineFiles[line].Variants[r.shape].Stops
+		}
 		start := time.Now()
-		k.Observe(quality.Fix{Vehicle: r.veh, Trip: t.ID, Line: line, Headsign: head, Shape: r.shape,
-			Pattern: strconv.Itoa(int(t.Pattern)), Stops: ss, S: r.s, T: r.t})
+		k.Observe(quality.Fix{Vehicle: r.veh, Trip: t.ID, Line: line, Headsign: head, Shape: r.shape, Stops: ss, S: r.s, T: r.t})
 		res.Observed++
 		var lv quality.VehicleLevel
 		state, ok := k.State(r.veh, t.ID)

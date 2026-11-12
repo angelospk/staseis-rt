@@ -8,6 +8,15 @@ import (
 // Five stops 500 m apart on shape SH.
 var stops = []Stop{{"S0", 0}, {"S1", 500}, {"S2", 1000}, {"S3", 1500}, {"S4", 2000}}
 
+// ids are the stop ids of a stop list, the Pattern a client was given.
+func ids(st []Stop) []string {
+	out := make([]string, len(st))
+	for i, x := range st {
+		out[i] = x.ID
+	}
+	return out
+}
+
 func fix(veh string, s float64, t int64) Fix {
 	return Fix{Vehicle: veh, Trip: "T-" + veh, Line: "040", Headsign: "Σύνταγμα", Shape: "SH", Stops: stops, S: s, T: t}
 }
@@ -144,7 +153,7 @@ func TestSegments(t *testing.T) {
 	drive(k, "A", 0, 2000, 0, 10) // 10 m/s: S1 at 50, S2 100, S3 150, S4 200
 	drive(k, "B", 0, 2000, 60, 5) // 5 m/s: S1 at 160 … S4 at 460
 	drive(k, "C", 0, 1000, 0, 2)  // 2 m/s, only to S2: S1 at 250, S2 at 500
-	segs := k.Segments("SH", 600)
+	segs := k.Segments("SH", ids(stops), 600)
 	// No S0-S1: a run that starts at a stop has not passed it.
 	want := map[string]struct {
 		n   int
@@ -168,10 +177,10 @@ func TestSegments(t *testing.T) {
 		t.Errorf("S1-S2 alongs = %v..%v", s.FromAlong, s.ToAlong)
 	}
 	// Later than Window after every traversal: none left.
-	if segs := k.Segments("SH", 600+int64(Window.Seconds())); len(segs) != 0 {
+	if segs := k.Segments("SH", ids(stops), 600+int64(Window.Seconds())); len(segs) != 0 {
 		t.Errorf("old traversals listed: %+v", segs)
 	}
-	if segs := k.Segments("OTHER", 600); len(segs) != 0 {
+	if segs := k.Segments("OTHER", ids(stops), 600); len(segs) != 0 {
 		t.Errorf("unknown shape: %+v", segs)
 	}
 }
@@ -182,7 +191,7 @@ func TestImplausibleTraversal(t *testing.T) {
 	k.Observe(fix("A", 400, 0))
 	k.Observe(fix("A", 600, 10))
 	k.Observe(fix("A", 1100, 20)) // S1→S2 in 500/50 m/s
-	if segs := k.Segments("SH", 30); len(segs) != 0 {
+	if segs := k.Segments("SH", ids(stops), 30); len(segs) != 0 {
 		t.Errorf("jump counted: %+v", segs)
 	}
 }
@@ -212,7 +221,7 @@ func TestSegmentsPoolLines(t *testing.T) {
 	for t, s := int64(0), 0.0; s <= 1500; t, s = t+10, s+50 { // line 999 on SH2: 5 m/s
 		k.Observe(Fix{Vehicle: "Z", Trip: "TZ", Line: "999", Headsign: "Χ", Shape: "SH2", Stops: other, S: s, T: t})
 	}
-	segs := k.Segments("SH", 400)
+	segs := k.Segments("SH", ids(stops), 400)
 	var s12 *SegmentObs
 	for i := range segs {
 		if segs[i].From == "S1" && segs[i].To == "S2" {
@@ -222,8 +231,8 @@ func TestSegmentsPoolLines(t *testing.T) {
 	if s12 == nil || s12.N != 2 || math.Abs(s12.MedianMS-7.5) > 0.01 || s12.FromAlong != 500 || s12.ToAlong != 1000 {
 		t.Fatalf("SH S1-S2 = %+v (all %+v)", s12, segs)
 	}
-	// SH2 lists S1-S2 with its own alongs, and X0-S1 / S2-X3 only it crossed.
-	segs = k.Segments("SH2", 400)
+	// SH2 lists S1-S2 with its own alongs, and S2-X3 only it crossed.
+	segs = k.Segments("SH2", ids(other), 400)
 	if len(segs) != 2 || segs[0].From != "S1" || segs[0].FromAlong != 300 || segs[0].N != 2 || segs[1].From != "S2" {
 		t.Errorf("SH2 = %+v", segs)
 	}
@@ -235,7 +244,7 @@ func TestRepeatMakesNoTraversal(t *testing.T) {
 	k := NewTracker()
 	drive(k, "A", 400, 1100, 0, 10)  // S1 at 10, S2 at 60
 	drive(k, "A", 400, 1100, 80, 10) // 700 m back: a new run, S1 and S2 again
-	segs := k.Segments("SH", 200)
+	segs := k.Segments("SH", ids(stops), 200)
 	if len(segs) != 1 || segs[0].N != 1 {
 		t.Errorf("segments = %+v, want S1-S2 once", segs)
 	}
@@ -256,22 +265,41 @@ func TestJumpPassesNothing(t *testing.T) {
 	}
 }
 
-// TestSegmentsEveryPattern: an express pattern of the same shape (S1, S3) does not hide the
-// local pattern's segments; a shape lists the segments of every pattern seen on it.
-func TestSegmentsEveryPattern(t *testing.T) {
+// TestSegmentsFollowThePattern: a shape lists the segments of the stops it is asked for (the
+// Pattern clients were given), whatever stop lists its trips had; a pair it does not have
+// consecutive is not listed.
+func TestSegmentsFollowThePattern(t *testing.T) {
 	k := NewTracker()
 	drive(k, "A", 400, 1100, 0, 10) // local: S1→S2
 	express := []Stop{stops[0], stops[1], stops[3]}
 	for t, s := int64(0), 400.0; s <= 1600; t, s = t+10, s+100 {
-		k.Observe(Fix{Vehicle: "E", Trip: "TE", Line: "040", Headsign: "Σύνταγμα", Shape: "SH", Pattern: "express",
-			Stops: express, S: s, T: t})
+		k.Observe(Fix{Vehicle: "E", Trip: "TE", Line: "040", Headsign: "Σύνταγμα", Shape: "SH", Stops: express, S: s, T: t})
 	}
 	got := map[string]int{}
-	for _, s := range k.Segments("SH", 300) {
+	for _, s := range k.Segments("SH", ids(stops), 300) {
 		got[s.From+"-"+s.To] = s.N
 	}
-	if got["S1-S2"] != 1 || got["S1-S3"] != 1 || len(got) != 2 {
-		t.Errorf("segments %v, want S1-S2 and S1-S3", got)
+	if got["S1-S2"] != 1 || len(got) != 1 {
+		t.Errorf("segments %v, want only S1-S2 of the pattern", got)
+	}
+	if segs := k.Segments("SH", ids(express), 300); len(segs) != 1 || segs[0].To != "S3" || segs[0].ToAlong != 1500 {
+		t.Errorf("express pattern: %+v", segs)
+	}
+	if segs := k.Segments("SH", []string{"S1", "NOWHERE"}, 300); len(segs) != 0 {
+		t.Errorf("a stop with no known place: %+v", segs)
+	}
+}
+
+// TestLateFirstGap: a bus that passed with no bus ahead known gets its gap when the pass of the
+// bus ahead arrives later.
+func TestLateFirstGap(t *testing.T) {
+	k := NewTracker()
+	k.Observe(fix("C", 900, 500))
+	k.Observe(fix("C", 1200, 530)) // S2 at 510, alone
+	k.Observe(fix("B", 900, 250))
+	k.Observe(fix("B", 1200, 280)) // S2 at 260, seen later
+	if st, _ := k.State("C", "T-C"); st.Gap == nil || st.Gap.GapS != 250 || st.Gap.Stop != "S2" || st.Gap.At != 510 {
+		t.Errorf("C gap = %+v, want 250 at S2", st.Gap)
 	}
 }
 
@@ -284,7 +312,7 @@ func TestSegmentsSameRoadOnly(t *testing.T) {
 	for t, s := int64(0), 0.0; s <= 1500; t, s = t+10, s+50 {
 		k.Observe(Fix{Vehicle: "Z", Trip: "TZ", Line: "999", Headsign: "Χ", Shape: "SH2", Stops: detour, S: s, T: t})
 	}
-	for _, s := range k.Segments("SH", 400) {
+	for _, s := range k.Segments("SH", ids(stops), 400) {
 		if s.From == "S1" && s.N != 1 {
 			t.Errorf("SH S1-S2 n = %d, want 1 (the detour is another road)", s.N)
 		}
@@ -296,7 +324,7 @@ func TestReset(t *testing.T) {
 	k := NewTracker()
 	drive(k, "A", 0, 2000, 0, 10)
 	k.Reset()
-	if v, p, tr := k.Size(); v+p+tr != 0 || len(k.Segments("SH", 300)) != 0 {
+	if v, p, tr := k.Size(); v+p+tr != 0 || len(k.Segments("SH", ids(stops), 300)) != 0 {
 		t.Errorf("after Reset: %d %d %d", v, p, tr)
 	}
 }

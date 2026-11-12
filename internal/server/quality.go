@@ -3,7 +3,6 @@ package server
 import (
 	"math"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/angelospk/athens-transit-rt/internal/model"
 	"github.com/angelospk/athens-transit-rt/internal/quality"
 	"github.com/angelospk/athens-transit-rt/internal/segspeed"
+	"github.com/angelospk/athens-transit-rt/internal/staticsite"
 	"github.com/angelospk/athens-transit-rt/internal/usual"
 )
 
@@ -100,7 +100,7 @@ func (a *App) liveQuality(w *world, results []match.Result, vehicles []Vehicle) 
 			continue
 		}
 		a.live.Observe(quality.Fix{Vehicle: r.VehicleID, Trip: t.ID, Line: w.feed.Line(t), Headsign: w.feed.Headsign(t),
-			Shape: w.feed.Shapes[t.Shape].ID, Pattern: strconv.Itoa(int(t.Pattern)), Stops: w.liveStops(t, g),
+			Shape: w.feed.Shapes[t.Shape].ID, Stops: w.liveStops(t, g),
 			S: r.Along, T: r.Time.Unix()})
 		fed[i] = true
 	}
@@ -142,15 +142,32 @@ func qualityV2(q quality.VehicleLevel) *model.VehicleQuality {
 	return out
 }
 
-// lineSegments is the live level of every segment of the line's shapes crossed within
-// quality.Window before now, by pattern and place along it.
+// patternStops is the stop ids of each Pattern of a line, by shape id: what /v2/lines/{id}
+// advertises (staticsite.LineFileOf), cached per line on this feed.
+func (w *world) patternStops(line string) map[string][]string {
+	w.patMu.Lock()
+	defer w.patMu.Unlock()
+	if ps, ok := w.patStops[line]; ok {
+		return ps
+	}
+	ps := map[string][]string{}
+	for shape, v := range staticsite.LineFileOf(w.feed, line).Variants {
+		ps[shape] = v.Stops
+	}
+	if w.patStops == nil {
+		w.patStops = map[string]map[string][]string{}
+	}
+	w.patStops[line] = ps
+	return ps
+}
+
+// lineSegments is the live level of every segment of the line's Patterns crossed within
+// quality.Window before now, by Pattern and in stop order.
 func (a *App) lineSegments(w *world, line string, now time.Time) []model.Segment {
-	f := w.feed
-	var ids []string
-	for s := range w.shapeDirs(line) {
-		if s >= 0 && int(s) < len(f.Shapes) {
-			ids = append(ids, f.Shapes[s].ID)
-		}
+	pats := w.patternStops(line)
+	ids := make([]string, 0, len(pats))
+	for id := range pats {
+		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	tab := a.segs.Load()
@@ -160,7 +177,7 @@ func (a *App) lineSegments(w *world, line string, now time.Time) []model.Segment
 	slot := segspeed.Slot(now, gtfs.Athens)
 	out := []model.Segment{}
 	for _, id := range ids {
-		for _, o := range a.live.Segments(id, now.Unix()) {
+		for _, o := range a.live.Segments(id, pats[id], now.Unix()) {
 			seg := model.Segment{Pattern: oasaPrefix + id, From: oasaPrefix + o.From, To: oasaPrefix + o.To,
 				Level: string(quality.Unknown), Speed: round1(o.MedianMS), N: o.N}
 			if u, ok := tab.Between(id, o.FromAlong, o.ToAlong, slot); ok && u > 0 {

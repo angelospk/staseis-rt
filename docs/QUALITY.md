@@ -55,8 +55,8 @@ Replay of real history (`atrt quality-replay`, Tuesday 2026-10-27, 15 training w
 
 | Hour | Vehicle fixes: headway basis (normal / worse / much worse / unknown) | schedule basis (normal / worse / much worse) | Segment ratings every 5 min (normal / worse / much worse / unknown) |
 |---|---|---|---|
-| 08:00 | 1896 / 1176 / 1490 / 2137 (bunched 350) | 9616 / 11004 / 10784 | 51486 / 4789 / 385 / 63140 |
-| 18:00 | 261 / 232 / 714 / 426 (bunched 264) | 7718 / 8484 / 11043 | 36755 / 7424 / 735 / 63521 |
+| 08:00 | 1896 / 1176 / 1490 / 2137 (bunched 350) | 9616 / 11004 / 10784 | 51442 / 4787 / 385 / 62864 |
+| 18:00 | 261 / 232 / 714 / 426 (bunched 264) | 7718 / 8484 / 11043 | 36731 / 7424 / 735 / 63261 |
 
 The schedule basis is pessimistic in this replay: those days ran on an expired GTFS, and the old
 history has no `run_start`, so the delays are against the GTFS and not against OASA's daily
@@ -103,9 +103,9 @@ City facts that change what is possible:
   `deploy/atrt-history-release.service` exists. Without it, history older than 30 days is lost
   and past days cannot be recomputed (`atrt stats --force`).
 - Live quality (#173), measured on the replay of 2026-10-27 08:00 (48 887 fixes, 1074 buses):
-  14 µs per fix (the tracker, the usual lookup with its hourly cache, the level), about 0.15 ms
-  CPU per second of Athens traffic; rating every segment of every shape takes 3.6 ms. Memory:
-  +11.6 MB (35 751 stop passes, 38 322 traversals, the usual rows of the stops looked up in two
+  14.5 µs per fix (the tracker, the usual lookup with its hourly cache, the level), about 0.15 ms
+  CPU per second of Athens traffic; rating every segment of every shape takes 2.8 ms. Memory:
+  +12.2 MB (35 751 stop passes, 38 322 traversals, the usual rows of the stops looked up in two
   hours). Athens runs in a
   200 MB container (`compose.yaml`); oracle-vm (citybus) gets none of it.
 - Day files are written once after the day ends. A changed formula applies to new days only,
