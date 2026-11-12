@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -149,5 +150,34 @@ func TestRunFilteredMarksAnEmptyDayOnce(t *testing.T) {
 	// Athens (no prefix) keeps its old way: no marker.
 	if _, err := Run(hist, t.TempDir(), athens, now, false, nil); err == nil {
 		t.Fatal("Run without a filter must still read the day")
+	}
+}
+
+// A city with a timetable but no live bus that day (Drama, Kastoria) still gets its day, for the
+// frequency (staseis-rt#167); with no frequency either it gets the marker.
+func TestRunFilteredKeepsATimetableOnlyDay(t *testing.T) {
+	hist, out := t.TempDir(), t.TempDir()
+	at := local(2026, 11, 12, 10, 0, 0)
+	writeHour(t, hist, hourName(at), ".csv.gz", fix{at, "pat:1", "pat:a", 38.2, 21.7})
+	now := local(2026, 11, 13, 6, 0, 0)
+	plan := func(date string) (*Plan, error) {
+		p := &Plan{GTFS: "v", Source: SourceTimetable, Frequency: true, Trips: []PlanTrip{}}
+		if date != "2026-11-12" {
+			return p, nil
+		}
+		for h := 8; h < 12; h++ {
+			s := local(2026, 11, 12, h, 0, 0).Unix()
+			p.Trips = append(p.Trips, PlanTrip{ID: fmt.Sprint(h), Line: "dra:1", Start: s, End: s + 1800})
+		}
+		return p, nil
+	}
+	days, err := RunFiltered(hist, out, athens, now, false, plan, Filter{Prefix: "dra:"})
+	if err != nil || fmt.Sprint(days) != "[2026-11-12]" {
+		t.Fatalf("days %v, %v", days, err)
+	}
+	var d Day
+	readJSON(t, filepath.Join(out, "days", "2026-11-12.json"), &d)
+	if d.Fixes != 0 || d.Frequency == nil || len(d.Frequency.ByLine) != 1 || d.Frequency.ByLine[0].Band != "60" {
+		t.Fatalf("day %+v, frequency %+v", d, d.Frequency)
 	}
 }

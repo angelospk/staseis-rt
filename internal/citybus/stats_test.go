@@ -176,3 +176,19 @@ func TestRunStatsWritesTheOriginOTP(t *testing.T) {
 		t.Fatalf("2 departures a day are no frequency: %+v", d.Frequency)
 	}
 }
+
+// A code's time is Athens civil time: on the night the clocks go forward (2027-03-28, 03:00 ->
+// 04:00) the 00:30 run leaves at 00:30 local, and the 25:10 run at 01:10 of the next day.
+func TestRunDepartureIsCivilTime(t *testing.T) {
+	c, _, _, _, _ := runCity(t, t.TempDir(), nil)
+	for code, want := range map[string]time.Time{
+		"t:20270328_10_0100000_00_30": time.Date(2027, 3, 28, 0, 30, 0, 0, athensLoc),
+		"t:20270328_10_0100000_05_00": time.Date(2027, 3, 28, 5, 0, 0, 0, athensLoc),
+		"t:20270327_10_0100000_25_10": time.Date(2027, 3, 28, 1, 10, 0, 0, athensLoc),
+		"t:20271030_10_0100000_24_30": time.Date(2027, 10, 31, 0, 30, 0, 0, athensLoc),
+	} {
+		if got, ok := c.runDeparture(code); !ok || got != want.Unix() {
+			t.Errorf("%s: %v %v, want %v", code, time.Unix(got, 0).In(athensLoc), ok, want)
+		}
+	}
+}

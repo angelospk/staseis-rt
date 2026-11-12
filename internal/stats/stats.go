@@ -418,7 +418,7 @@ func RunFiltered(historyDir, out string, loc *time.Location, now time.Time, forc
 			}
 		}
 		day, err := ComputeFiltered(date, loc, files, now, p, f)
-		if err == nil && day.Fixes == 0 {
+		if err == nil && day.Fixes == 0 && day.Frequency == nil { // a timetable-only city keeps its frequency
 			if f.Prefix != "" {
 				if err := os.WriteFile(none, nil, 0o644); err != nil {
 					errs = append(errs, fmt.Errorf("stats %s: %w", date, err))

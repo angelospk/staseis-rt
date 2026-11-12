@@ -96,7 +96,9 @@ func (c *City) statsPlan(date string) (*stats.Plan, error) {
 }
 
 // runDeparture reads a vehicle of the city's history rows ("pat:20261110_4_0100000_17_20") as a
-// run: its scheduled departure (unix s). A device id, or a row of another city, is no run.
+// run: its scheduled departure (unix s), as Athens civil time (hours 24-29 are the next day), so
+// a run on the night the clocks change leaves at the time on the stop's sign. A device id, or a
+// row of another city, is no run.
 func (c *City) runDeparture(veh string) (int64, bool) {
 	code, ok := strings.CutPrefix(veh, c.Conf.ID+":")
 	if !ok {
@@ -106,8 +108,11 @@ func (c *City) runDeparture(veh string) (int64, bool) {
 	if !ok {
 		return 0, false
 	}
-	base, _, ok := dayBase(date)
-	return base + int64(dep), ok
+	d, err := time.ParseInLocation(time.DateOnly, date, athensLoc)
+	if err != nil {
+		return 0, false
+	}
+	return time.Date(d.Year(), d.Month(), d.Day(), dep/3600, dep/60%60, 0, 0, athensLoc).Unix(), true
 }
 
 // statsRoute serves the city's stats files (index and days) and reports whether it handled the
