@@ -479,3 +479,16 @@ func TestDailyRunSharesAreClampedAndOldRowsDropped(t *testing.T) {
 		}
 	}
 }
+
+// A plan trip keeps its GTFS direction_id (the direction of its headways).
+func TestNewPlanKeepsTheDirection(t *testing.T) {
+	f := gtfstest.StraightLine{Stops: 5, Trips: 2, First: 8 * 3600, Headway: 60, Leg: 2}.Feed(t)
+	f.Trips[1].Dir = 1
+	p, err := NewPlan(f, "v1", "2026-09-28", athens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Trips) != 2 || p.Trips[0].Dir != 0 || p.Trips[1].Dir != 1 {
+		t.Fatalf("trips = %+v", p.Trips)
+	}
+}
