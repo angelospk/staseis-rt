@@ -36,9 +36,9 @@ you cite TCQSM.
 
 | Measure | Athens (OASA) | Thessaloniki (OASTH) | citybus.gr (28 cities) |
 |---|---|---|---|
-| Headway regularity | **live** (#162, PR #163, from 2026-11-13) | **live** (#164, PR #166): GTFS trips, ~5 directions qualify | not built: only 2 Patras lines are ≤ 10 min (#165) |
-| Frequency band | not built (easy, from the plan) | not built (easy, from GTFS) | **PR #169 open** (#167): 27 cities |
-| Origin OTP | not built; `start_delay` has the data | not checked | **PR #169 open**: 21 cities. 2026-11-12: Patras 73.1 %, Larissa 79.0 %, Komotini 92.5 % |
+| Headway regularity | **live** (#162, PR #163, from 2026-11-13); shown on the web line card | **live** (#164, PR #166): GTFS trips, ~5 directions qualify | not built: only 2 Patras lines are ≤ 10 min (#165) |
+| Frequency band | not built (easy, from the plan) | not built (easy, from GTFS) | **live** (#167, PR #169, merged 2026-11-12): 27 cities |
+| Origin OTP | not built; `start_delay` has the data | not checked | **live** (PR #169): 21 cities; shown on the web line card. 2026-11-12: Patras 73.1 %, Larissa 79.0 %, Komotini 92.5 % |
 | Mid-route / terminal OTP, excess wait | planned: needs a pass at every stop | not checked | blocked by #168 (board GPS lag unmeasured) |
 | Segment delay (now vs usual) | planned; usual speed exists (`internal/segspeed`, 200 m bins × hour × day type) | not checked | not checked |
 
@@ -72,8 +72,23 @@ City facts that change what is possible:
 
 ## What the user sees (web `athens-transit-map`, app `athens-transit-app`)
 
-Today: none of the quality measures is shown. The web stats view (`src/lib/ui/StatsView.svelte`)
-shows trips run, buses on the road, network speed and slowest/fastest lines.
+Today (web, 2026-11-13, `src/lib/quality.ts`, `src/lib/ui/LineCard.svelte`, web 1f0fd68): the line card shows
+one «Χθες» pill under its header, from yesterday's day file of the city (fetched once per page load),
+only when there is data (no grey pill):
+
+- Frequent direction (a `headways` entry for the line and the shown direction; the card's direction
+  is matched to the stats `dir` through the line's timetable headsign): `cv_h` ≤ 0.39 green
+  «Κανονικά χθες», ≤ 0.74 yellow «Αραιά χθες», above red «Πολύ αραιά χθες», then
+  «· περίμενες ~{wait_min}′», plus «(κανονικά ~{mean/2}′)» when not green.
+- Sparse citybus.gr line (`origin_otp.by_line`, per line, ≥ 5 measured runs): ≥ 80 % green
+  «Συνήθως στην ώρα του», 70–79 % yellow «Αργεί συχνά», < 70 % red «Αργεί πολύ», then
+  «· χθες N στα 10 δρομολόγια στην ώρα τους».
+- Athens and Thessaloniki sparse lines: no pill (no OTP yet). Day files before 2026-11-12 have no
+  `wait_min`: no pill. Each morning, until the day file is written, there is no pill.
+- The colour is in the dot and the tint only (`--ontime`, `--late1`, `--late3`); the words keep
+  the text colour, for 4.5:1 contrast in light and dark.
+
+The app shows none of it yet. The web stats view (`src/lib/ui/StatsView.svelte`) shows trips run, buses on the road, network speed and slowest/fastest lines.
 
 Agreed design (Harold, 2026-11-13; mockup `athens-transit-map/docs/mockups/quality-v2.html`;
 the first, rejected one is `quality-v1-rejected.html`: too much information, unclear words):
@@ -95,9 +110,9 @@ band for this hour and where today is now.
 
 ## Roadmap
 
-1. Merge PR #169 (citybus frequency + origin OTP); check the Patras early share.
-2. Web: line badge "χθες" on the line card from the daily stats (Athens, Thessaloniki,
-   citybus).
+1. ~~Merge PR #169 (citybus frequency + origin OTP)~~ done 2026-11-12; check the Patras early share.
+2. ~~Web: line badge "χθες" on the line card from the daily stats (Athens, Thessaloniki,
+   citybus)~~ done 2026-11-13 (web 1f0fd68).
 3. Backend: live "now vs usual" per segment (`segspeed` baseline) and per vehicle (gap to the bus
    ahead on frequent lines).
 4. Web and app: vehicle and segment colours on the new scale; retire the delay colours.
