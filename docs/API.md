@@ -562,7 +562,7 @@ no pass. Headways are the gaps between consecutive passes of the direction in th
 Athens, only lines planned from OASA's daily schedule (`oasa_daily`). Thessaloniki has no daily
 schedule: there a pass is the time a GTFS trip's matched bus crosses `at` of the trip's own stop
 span (one pass per trip, the earliest when two buses were matched to it; two fixes on different
-trips of the same direction also place one, since the matcher can move a bus on the way), and a direction is the
+trips of the same direction and stop span also place one, since the matcher can move a bus on the way), and a direction is the
 line's trips with one GTFS `direction_id`, across route variants. A bus without working telematics has no pass,
 so two headways merge into one: `mean_headway_s`, `cv_h`, `wait_min`, `ewt_min` and
 `off_headway_share` are biased, usually up, but a missing bus can also hide a bunch and lower them.

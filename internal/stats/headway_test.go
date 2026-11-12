@@ -227,3 +227,18 @@ func TestGTFSHeadwaysAcrossATripSwitch(t *testing.T) {
 		t.Errorf("passes %v, want only G1 (index 2) at %d", c.tripPass, t0+30)
 	}
 }
+
+// A switch to a trip with another span (a route variant) places no pass: shares of different
+// spans do not compare, so a bus standing at 1400 m must not "cross" mid-route.
+func TestGTFSHeadwaysNoPassAcrossSpans(t *testing.T) {
+	loc, _ := time.LoadLocation(TZ)
+	plan := gtfsHeadwayPlan(loc, 2, 5*time.Minute)
+	plan.Trips[2].FromM = 500 // G1: span 500-2000
+	c := newTripCounter(plan)
+	t0 := plan.Trips[0].Start + 600
+	c.add(t0, "v", "G0", "v1", 1400)    // share 0.4 of G0
+	c.add(t0+60, "v", "G1", "v1", 1400) // share 0.6 of G1: the same place
+	if c.tripPass[0] != 0 || c.tripPass[2] != 0 {
+		t.Errorf("passes %v, want none", c.tripPass)
+	}
+}

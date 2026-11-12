@@ -196,17 +196,18 @@ type tripCounter struct {
 }
 
 // dirVeh is a vehicle on the GTFS trips of one line and direction: the matcher can move a bus
-// between them on the way (#131), so a pass is found across the switch.
+// between them on the way (#131), so a pass is found across a switch between trips of one span.
 type dirVeh struct {
 	line string
 	dir  int
 	veh  string
 }
 
-// tripAt is the share of its trip's span at a vehicle's last measured fix, at time t.
+// tripAt is the share of its trip's span sp at a vehicle's last measured fix, at time t.
 type tripAt struct {
 	at float64
 	t  int64
+	sp Span
 }
 
 type tripSeen struct {
@@ -290,14 +291,16 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		if c.tripPass != nil && sm >= 0 && pt.ToM > pt.FromM {
 			share := min(max((sm-pt.FromM)/(pt.ToM-pt.FromM), 0), 1)
 			kv := dirVeh{pt.Line, pt.Dir, veh}
+			sp := Span{pt.FromM, pt.ToM}
 			prev, ok := c.tripAt[kv]
 			if ok && t <= prev.t {
 				continue // a copy of an older row
 			}
+			ok = ok && prev.sp == sp // shares of another span (a route variant) do not compare
 			if p, crossed := crossing(prev.at, prev.t, share, t); ok && crossed && (c.tripPass[k] == 0 || p < c.tripPass[k]) {
 				c.tripPass[k] = p
 			}
-			c.tripAt[kv] = tripAt{share, t}
+			c.tripAt[kv] = tripAt{share, t, sp}
 		}
 	}
 	if d, ok := c.dailyOf[trip]; ok && d >= 0 {
