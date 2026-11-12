@@ -191,6 +191,14 @@ func TestGTFSHeadwaysOnePassPerTrip(t *testing.T) {
 	if l := h.ByLine[0]; l.N != 8 || l.MeanS != 300 || l.CVh != 0 {
 		t.Errorf("got %+v", l)
 	}
+	// A second bus that passed earlier wins, whatever order its rows arrive in.
+	c = newTripCounter(plan)
+	pt := plan.Trips[3]
+	runGTFS(c, "v3", pt.ID, pt.Start+600)
+	runGTFS(c, "early", pt.ID, pt.Start+420)
+	if c.tripPass[3] != pt.Start+450 {
+		t.Errorf("pass %d, want the earlier %d", c.tripPass[3], pt.Start+450)
+	}
 
 	c = newTripCounter(plan)
 	for i, pt := range plan.Trips {
@@ -203,5 +211,19 @@ func TestGTFSHeadwaysOnePassPerTrip(t *testing.T) {
 	}
 	if h := c.headways(start, loc); h != nil {
 		t.Errorf("8 passes, 7 headways: want nil, got %+v", h)
+	}
+}
+
+// The matcher can move a bus to another trip of its direction on the way (#131): a crossing
+// between a fix on one trip and the next on another still places a pass, on the later trip.
+func TestGTFSHeadwaysAcrossATripSwitch(t *testing.T) {
+	loc, _ := time.LoadLocation(TZ)
+	plan := gtfsHeadwayPlan(loc, 2, 5*time.Minute)
+	c := newTripCounter(plan)
+	t0 := plan.Trips[0].Start + 600
+	c.add(t0, "v", "G0", "v1", 1400)    // share 0.4 of G0
+	c.add(t0+60, "v", "G1", "v1", 1600) // share 0.6 of G1, the same direction
+	if c.tripPass[0] != 0 || c.tripPass[2] != t0+30 {
+		t.Errorf("passes %v, want only G1 (index 2) at %d", c.tripPass, t0+30)
 	}
 }

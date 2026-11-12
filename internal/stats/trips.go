@@ -190,18 +190,20 @@ type tripCounter struct {
 	dailyOf       map[string]int     // GTFS trip id -> index in plan.Daily (the first direction with it)
 	cur           map[busKey]*busRun // the latest bus run of each vehicle on a daily direction
 	buses         []*busRun          // all bus runs on the daily directions
-	tripAt        map[tripVeh]tripAt // GTFSHeadways: the last measured fix of a vehicle on a plan trip
+	tripAt        map[dirVeh]tripAt  // GTFSHeadways: the last measured fix of a vehicle on a direction
 	tripPass      []int64            // GTFSHeadways: the earliest pass of each plan trip (0: none)
 	stamped, ours int                // rows of the day with a feed version, and those of the plan's
 }
 
-// tripVeh is a vehicle on a plan trip (index in plan.Trips).
-type tripVeh struct {
-	k   int
-	veh string
+// dirVeh is a vehicle on the GTFS trips of one line and direction: the matcher can move a bus
+// between them on the way (#131), so a pass is found across the switch.
+type dirVeh struct {
+	line string
+	dir  int
+	veh  string
 }
 
-// tripAt is the share of a trip's span at a vehicle's last measured fix, at time t.
+// tripAt is the share of its trip's span at a vehicle's last measured fix, at time t.
 type tripAt struct {
 	at float64
 	t  int64
@@ -242,7 +244,7 @@ func newTripCounter(plan *Plan) *tripCounter {
 	c := &tripCounter{plan: plan, byID: map[string][]int{}, state: make([]tripSeen, len(plan.Trips)),
 		dailyOf: map[string]int{}, cur: map[busKey]*busRun{}}
 	if plan.GTFSHeadways {
-		c.tripAt, c.tripPass = map[tripVeh]tripAt{}, make([]int64, len(plan.Trips))
+		c.tripAt, c.tripPass = map[dirVeh]tripAt{}, make([]int64, len(plan.Trips))
 	}
 	for i, pt := range plan.Trips {
 		c.byID[pt.ID] = append(c.byID[pt.ID], i)
@@ -287,7 +289,7 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		c.state[k].note(sm, Span{pt.FromM, pt.ToM})
 		if c.tripPass != nil && sm >= 0 && pt.ToM > pt.FromM {
 			share := min(max((sm-pt.FromM)/(pt.ToM-pt.FromM), 0), 1)
-			kv := tripVeh{k, veh}
+			kv := dirVeh{pt.Line, pt.Dir, veh}
 			prev, ok := c.tripAt[kv]
 			if ok && t <= prev.t {
 				continue // a copy of an older row
