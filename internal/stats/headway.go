@@ -14,9 +14,9 @@ const (
 	HeadwayMaxGap = 5 * time.Minute
 	// HeadwayFromH and HeadwayToH: only passes in [from, to) local time count (daytime).
 	HeadwayFromH, HeadwayToH = 7, 21
-	// HeadwayMaxRef: only directions whose median observed headway is at most this count
-	// (high-frequency lines).
-	HeadwayMaxRef = 12 * time.Minute
+	// HeadwayMaxRef: only directions whose mean observed headway is at most this count
+	// (high-frequency lines; TCQSM 4th ed. Exhibit 5-9 applies to headways of 10 min or less).
+	HeadwayMaxRef = 10 * time.Minute
 	// HeadwayMinN: a direction with fewer headways is left out.
 	HeadwayMinN = 8
 )
@@ -29,50 +29,67 @@ type Headways struct {
 	ByLine []LineHeadway `json:"by_line"`
 }
 
-// LineHeadway is one direction of one line. The reference headway is the median observed one
-// (the scheduled headway at the reference point is not known), so cv_h = stddev(h) / ref.
+// LineHeadway is one direction of one line, by TCQSM 4th edition (TCRP Research Report 262,
+// ch. 5): cv_h = stddev(h) / mean(h), with the mean observed headway in place of the scheduled one
+// (not known at the reference point).
 type LineHeadway struct {
-	Line    string  `json:"line"`
-	Dir     int     `json:"dir"` // 0 Go, 1 Come (OASA daily schedule)
-	N       int     `json:"n"`   // headways measured
-	RefMedS int64   `json:"ref_headway_median_s"`
-	MeanS   int64   `json:"mean_headway_s"`
-	CVh     float64 `json:"cv_h"`
-	EWTMin  float64 `json:"ewt_min"`
-	LOS     string  `json:"los"`
+	Line     string  `json:"line"`
+	Dir      int     `json:"dir"` // 0 Go, 1 Come (OASA daily schedule)
+	N        int     `json:"n"`   // headways measured
+	MeanS    int64   `json:"mean_headway_s"`
+	MedianS  int64   `json:"median_headway_s"`
+	CVh      float64 `json:"cv_h"`
+	WaitMin  float64 `json:"wait_min"`
+	EWTMin   float64 `json:"ewt_min"`
+	OffShare float64 `json:"off_headway_share"`
+	LOS      string  `json:"los"`
 }
 
-// HeadwayStats returns the median headway (s), cv_h and excess wait time (minutes) of the
-// headways hs (seconds), and false when there are fewer than HeadwayMinN of them.
-// cv_h = stddev(h - ref) / ref with ref the median; EWT = sum(h^2)/(2 sum(h)) - ref/2.
-func HeadwayStats(hs []float64) (ref, cv, ewtMin float64, ok bool) {
+// HeadwayStat sums a direction's headways (seconds; Mean and Median in seconds).
+type HeadwayStat struct {
+	Mean, Median float64
+	CV           float64 // population stddev / mean
+	WaitMin      float64 // average wait of a passenger arriving at random: 0.5 mean (1 + cv^2) (TCQSM Eq. 5-1)
+	EWTMin       float64 // excess wait over perfectly even service: WaitMin - mean/2
+	OffShare     float64 // share of headways with |h - mean| > mean/2 (bunched or a gap)
+}
+
+// HeadwayStats sums the headways hs (seconds); false when there are fewer than HeadwayMinN.
+func HeadwayStats(hs []float64) (HeadwayStat, bool) {
 	if len(hs) < HeadwayMinN {
-		return 0, 0, 0, false
+		return HeadwayStat{}, false
 	}
 	s := append([]float64(nil), hs...)
 	sort.Float64s(s)
 	n := len(s)
+	var st HeadwayStat
 	if n%2 == 1 {
-		ref = s[n/2]
+		st.Median = s[n/2]
 	} else {
-		ref = (s[n/2-1] + s[n/2]) / 2
+		st.Median = (s[n/2-1] + s[n/2]) / 2
 	}
-	if ref <= 0 {
-		return 0, 0, 0, false
-	}
-	var sum, sq float64
+	var sum float64
 	for _, h := range s {
 		sum += h
-		sq += h * h
 	}
-	mean := sum / float64(n)
+	st.Mean = sum / float64(n)
+	if st.Mean <= 0 {
+		return HeadwayStat{}, false
+	}
 	var v float64
+	off := 0
 	for _, h := range s {
-		v += (h - mean) * (h - mean)
+		v += (h - st.Mean) * (h - st.Mean)
+		if math.Abs(h-st.Mean) > st.Mean/2 {
+			off++
+		}
 	}
-	cv = math.Sqrt(v/float64(n)) / ref
-	ewtMin = (sq/(2*sum) - ref/2) / 60
-	return ref, cv, ewtMin, true
+	v /= float64(n)
+	st.CV = math.Sqrt(v) / st.Mean
+	st.EWTMin = v / (2 * st.Mean) / 60
+	st.WaitMin = st.Mean/2/60 + st.EWTMin
+	st.OffShare = float64(off) / float64(n)
+	return st, true
 }
 
 // LOS is the TCQSM headway-adherence level of service of a cv_h.
@@ -103,18 +120,15 @@ func (c *tripCounter) headways(start time.Time, loc *time.Location) *Headways {
 		for k := 1; k < len(ps); k++ {
 			hs = append(hs, float64(ps[k]-ps[k-1]))
 		}
-		ref, cv, ewt, ok := HeadwayStats(hs)
-		if !ok || ref > HeadwayMaxRef.Seconds() {
+		st, ok := HeadwayStats(hs)
+		if !ok || st.Mean > HeadwayMaxRef.Seconds() {
 			continue
-		}
-		var sum float64
-		for _, h := range hs {
-			sum += h
 		}
 		d := c.plan.Daily[i]
 		out.ByLine = append(out.ByLine, LineHeadway{Line: d.Line, Dir: d.Dir, N: len(hs),
-			RefMedS: int64(math.Round(ref)), MeanS: int64(math.Round(sum / float64(len(hs)))),
-			CVh: round3(cv), EWTMin: math.Round(ewt*100) / 100, LOS: LOS(cv)})
+			MeanS: int64(math.Round(st.Mean)), MedianS: int64(math.Round(st.Median)), CVh: round3(st.CV),
+			WaitMin: math.Round(st.WaitMin*100) / 100, EWTMin: math.Round(st.EWTMin*100) / 100,
+			OffShare: round3(st.OffShare), LOS: LOS(st.CV)})
 	}
 	if len(out.ByLine) == 0 {
 		return nil

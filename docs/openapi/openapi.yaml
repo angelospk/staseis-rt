@@ -2432,7 +2432,7 @@ components:
           description: |
             Regularity (headway adherence) of the high-frequency lines of OASA's daily schedule: one
             entry per direction with at least 8 headways from 07:00 to 21:00 local at mid-route and a
-            median observed headway of at most 720 s. Missing when no direction qualifies.
+            mean observed headway of at most 600 s (TCQSM 4th ed., ch. 5). Missing when no direction qualifies.
           required: [from_h, to_h, at, by_line]
           properties:
             from_h: {type: integer}
@@ -2442,15 +2442,17 @@ components:
               type: array
               items:
                 type: object
-                required: [line, dir, n, ref_headway_median_s, mean_headway_s, cv_h, ewt_min, los]
+                required: [line, dir, n, mean_headway_s, median_headway_s, cv_h, wait_min, ewt_min, off_headway_share, los]
                 properties:
                   line: {type: string}
                   dir: {type: integer, description: "0 Go, 1 Come."}
                   n: {type: integer, description: Headways measured.}
-                  ref_headway_median_s: {type: integer, description: Median observed headway (the reference).}
-                  mean_headway_s: {type: integer}
-                  cv_h: {type: number, description: "stddev(headway) / ref_headway_median_s."}
-                  ewt_min: {type: number, description: "Excess wait time, minutes: sum(h^2)/(2 sum(h)) - ref/2."}
+                  mean_headway_s: {type: integer, description: Mean observed headway (the reference).}
+                  median_headway_s: {type: integer}
+                  cv_h: {type: number, description: "Population stddev(headway) / mean_headway_s."}
+                  wait_min: {type: number, description: "Average wait, minutes: 0.5 mean (1 + cv_h^2) (TCQSM Eq. 5-1)."}
+                  ewt_min: {type: number, description: "Excess wait, minutes: wait_min - mean/2."}
+                  off_headway_share: {type: number, description: "Share of headways with |h - mean| > mean/2 (bunched or a gap)."}
                   los: {type: string, enum: [A, B, C, D, E, F], description: "TCQSM headway-adherence LOS of cv_h."}
 
     StaticLines:

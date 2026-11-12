@@ -25,6 +25,11 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
   fix-history CSV format ([#142](https://github.com/angelospk/staseis-rt/issues/142)).
 
 ### Statistics
+- `headways` in the daily stats follows TCQSM 4th edition (TCRP Research Report 262): `cv_h` divides
+  by the mean observed headway (was the median), only directions at a mean headway of 10 min or less
+  are listed (was a median of 12 min), and each direction gains `wait_min` (TCQSM Eq. 5-1),
+  `off_headway_share` (headways off the mean by more than half) and `median_headway_s`, which
+  replaces `ref_headway_median_s` ([#162](https://github.com/angelospk/staseis-rt/issues/162)).
 - The `trips` block of the daily stats plans from OASA's daily schedule when the static GTFS has
   expired: one planned trip per OASA run, paired with the buses that left near its time, instead
   of the trips of the summer timetable. A line without a daily schedule keeps the GTFS plan.
