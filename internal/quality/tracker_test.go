@@ -285,6 +285,9 @@ func TestSegmentsFollowThePattern(t *testing.T) {
 	if segs := k.Segments("SH", ids(express), 300); len(segs) != 1 || segs[0].To != "S3" || segs[0].ToAlong != 1500 {
 		t.Errorf("express pattern: %+v", segs)
 	}
+	if segs := k.Segments("SH", nil, 300); segs != nil {
+		t.Errorf("no stops: %+v", segs)
+	}
 	if segs := k.Segments("SH", []string{"S1", "NOWHERE"}, 300); len(segs) != 0 {
 		t.Errorf("a stop with no known place: %+v", segs)
 	}
@@ -326,5 +329,19 @@ func TestReset(t *testing.T) {
 	k.Reset()
 	if v, p, tr := k.Size(); v+p+tr != 0 || len(k.Segments("SH", ids(stops), 300)) != 0 {
 		t.Errorf("after Reset: %d %d %d", v, p, tr)
+	}
+}
+
+// TestSegmentsLoop: a loop line starts and ends at the same stop; both of its places count.
+func TestSegmentsLoop(t *testing.T) {
+	loop := []Stop{{"L0", 50}, {"L1", 500}, {"L2", 1000}, {"L0", 1500}}
+	k := NewTracker()
+	for t, s := int64(0), 0.0; s <= 1500; t, s = t+10, s+100 {
+		k.Observe(Fix{Vehicle: "A", Trip: "TA", Line: "LP", Headsign: "Κύκλος", Shape: "LOOP", Stops: loop, S: s, T: t})
+	}
+	segs := k.Segments("LOOP", ids(loop), 300)
+	if len(segs) != 3 || segs[0].From != "L0" || segs[0].FromAlong != 50 || segs[0].ToAlong != 500 ||
+		segs[2].To != "L0" || segs[2].FromAlong != 1000 || segs[2].ToAlong != 1500 {
+		t.Errorf("loop segments %+v", segs)
 	}
 }

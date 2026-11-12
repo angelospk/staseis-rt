@@ -2,6 +2,7 @@ package quality
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -90,14 +91,14 @@ type vehicle struct {
 type Tracker struct {
 	mu       sync.Mutex
 	vehicles map[string]*vehicle
-	passes   map[passKey][]pass            // newest last, at most keepPasses
-	segments map[[2]string][]traversal     // (from, to) stop ids -> traversals, by arrival
-	shapes   map[string]map[string]float64 // shape -> stop id -> its place along the shape
+	passes   map[passKey][]pass              // newest last, at most keepPasses
+	segments map[[2]string][]traversal       // (from, to) stop ids -> traversals, by arrival
+	shapes   map[string]map[string][]float64 // shape -> stop id -> its places along the shape (a loop: two), ascending
 }
 
 func NewTracker() *Tracker {
 	return &Tracker{vehicles: map[string]*vehicle{}, passes: map[passKey][]pass{},
-		segments: map[[2]string][]traversal{}, shapes: map[string]map[string]float64{}}
+		segments: map[[2]string][]traversal{}, shapes: map[string]map[string][]float64{}}
 }
 
 // Reset forgets everything: a new GTFS feed may reuse trip and shape ids for other geometry.
@@ -105,7 +106,7 @@ func (k *Tracker) Reset() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.vehicles, k.passes = map[string]*vehicle{}, map[passKey][]pass{}
-	k.segments, k.shapes = map[[2]string][]traversal{}, map[string]map[string]float64{}
+	k.segments, k.shapes = map[[2]string][]traversal{}, map[string]map[string][]float64{}
 }
 
 // Observe adds a fix. A fix that is not newer passes nothing. A fix of a new trip or shape,
@@ -117,11 +118,15 @@ func (k *Tracker) Observe(f Fix) {
 	defer k.mu.Unlock()
 	at := k.shapes[f.Shape]
 	if at == nil {
-		at = map[string]float64{}
+		at = map[string][]float64{}
 		k.shapes[f.Shape] = at
 	}
 	for _, st := range f.Stops {
-		at[st.ID] = st.Along
+		if xs := at[st.ID]; !slices.Contains(xs, st.Along) {
+			xs = append(xs, st.Along)
+			sort.Float64s(xs)
+			at[st.ID] = xs
+		}
 	}
 	v := k.vehicles[f.Vehicle]
 	if v != nil && f.T <= v.t {
@@ -238,16 +243,33 @@ func (k *Tracker) State(vehicle, trip string) (VehicleState, bool) {
 // SameRoad of the shape's (the same road), with their count and median speed. A stop the tracker
 // has no place for on shape (no fix of a trip with it yet) ends no segment.
 func (k *Tracker) Segments(shape string, stops []string, now int64) []SegmentObs {
+	if len(stops) < 2 {
+		return nil
+	}
 	from := now - int64(Window.Seconds())
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	at := k.shapes[shape]
 	var out []SegmentObs
 	var speeds []float64
+	// Each stop takes its first place past the previous stop's (a loop's end stop is its start).
+	place := func(stop string, after float64) (float64, bool) {
+		for _, x := range at[stop] {
+			if x > after {
+				return x, true
+			}
+		}
+		return 0, false
+	}
+	a, okA := place(stops[0], math.Inf(-1))
 	for i := 1; i < len(stops); i++ {
-		a, okA := at[stops[i-1]]
-		b, okB := at[stops[i]]
-		if !okA || !okB || b <= a {
+		b, okB := place(stops[i], a)
+		if !okB {
+			b, okB = place(stops[i], math.Inf(-1)) // unknown order: start over from this stop
+			okA = false
+		}
+		if !okA || !okB {
+			a, okA = b, okB
 			continue
 		}
 		m := b - a
@@ -261,6 +283,7 @@ func (k *Tracker) Segments(shape string, stops []string, now int64) []SegmentObs
 			out = append(out, SegmentObs{From: stops[i-1], To: stops[i], FromAlong: a, ToAlong: b,
 				N: len(speeds), MedianMS: median(speeds)})
 		}
+		a = b
 	}
 	return out
 }
