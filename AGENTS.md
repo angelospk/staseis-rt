@@ -1,5 +1,11 @@
 # Agent rules
 
+## Quality of service
+
+Before you touch daily stats, quality measures (headways, OTP, frequency, segment speed) or how
+they are shown, read [docs/QUALITY.md](docs/QUALITY.md). It holds the status per city, the agreed
+design and the roadmap. Update it in the same PR.
+
 ## Task board
 
 All work on Athens Transit (backend `athens-transit-rt`, app `athens-transit-app`, web
