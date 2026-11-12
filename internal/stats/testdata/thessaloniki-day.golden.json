@@ -1,0 +1,257 @@
+{
+ "version": 1,
+ "date": "2026-10-06",
+ "tz": "Europe/Athens",
+ "generated_at": 0,
+ "first_fix": 1791262770,
+ "last_fix": 1791265860,
+ "files": 1,
+ "fixes": 36,
+ "vehicles": 9,
+ "lines": 1,
+ "hours": [
+  {
+   "h": 0,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 1,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 2,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 3,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 4,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 5,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 6,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 7,
+   "fixes": 1,
+   "vehicles": 1,
+   "lines": 1,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 8,
+   "fixes": 35,
+   "vehicles": 9,
+   "lines": 1,
+   "dist_m": 0,
+   "time_s": 1080
+  },
+  {
+   "h": 9,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 10,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 11,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 12,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 13,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 14,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 15,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 16,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 17,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 18,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 19,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 20,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 21,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 22,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  },
+  {
+   "h": 23,
+   "fixes": 0,
+   "vehicles": 0,
+   "lines": 0,
+   "dist_m": 0,
+   "time_s": 0
+  }
+ ],
+ "by_line": [
+  {
+   "line": "T",
+   "fixes": 36,
+   "vehicles": 9,
+   "dist_m": 0,
+   "time_s": 1080
+  }
+ ],
+ "trips": {
+  "gtfs": "g",
+  "gtfs_expired": false,
+  "schedule_source": "gtfs",
+  "min_coverage": 0.5,
+  "planned": 9,
+  "run": 9,
+  "partial": 0,
+  "missed": 0,
+  "unmeasured": 0,
+  "by_line": [
+   {
+    "line": "T",
+    "schedule_source": "gtfs",
+    "planned": 9,
+    "run": 9,
+    "partial": 0,
+    "missed": 0,
+    "unmeasured": 0,
+    "missed_trips": null
+   }
+  ]
+ },
+ "headways": {
+  "from_h": 7,
+  "to_h": 21,
+  "at": 0.5,
+  "by_line": [
+   {
+    "line": "T",
+    "dir": 0,
+    "n": 8,
+    "mean_headway_s": 300,
+    "median_headway_s": 300,
+    "cv_h": 0,
+    "wait_min": 2.5,
+    "ewt_min": 0,
+    "off_headway_share": 0,
+    "los": "A"
+   }
+  ]
+ }
+}
