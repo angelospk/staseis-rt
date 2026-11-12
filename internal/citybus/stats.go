@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/angelospk/athens-transit-rt/internal/stats"
@@ -40,7 +41,8 @@ func (c *City) statsPlan(date string) (*stats.Plan, error) {
 	if m == nil {
 		return nil, errors.New("no static model yet")
 	}
-	p := &stats.Plan{GTFS: m.Version, Source: stats.SourceTimetable, Trips: []stats.PlanTrip{}}
+	p := &stats.Plan{GTFS: m.Version, Source: stats.SourceTimetable, Trips: []stats.PlanTrip{},
+		Frequency: true, RunDeparture: c.runDeparture}
 	for i := -1; i <= 1; i++ {
 		d := start.AddDate(0, 0, i).Format(time.DateOnly)
 		base, weekday, ok := dayBase(d)
@@ -71,7 +73,7 @@ func (c *City) statsPlan(date string) (*stats.Plan, error) {
 				if s < start.Unix() || s >= end.Unix() {
 					continue
 				}
-				pt := stats.PlanTrip{ID: t.ID, Line: c.lid(r.Line), Start: s,
+				pt := stats.PlanTrip{ID: t.ID, Line: c.lid(r.Line), Dir: r.Dir, Start: s,
 					End: base + int64(t.Times[last])}
 				if first < len(r.StopM) {
 					pt.FromM = r.StopM[first]
@@ -91,6 +93,21 @@ func (c *City) statsPlan(date string) (*stats.Plan, error) {
 		return a.ID < b.ID
 	})
 	return p, nil
+}
+
+// runDeparture reads a vehicle of the city's history rows ("pat:20261110_4_0100000_17_20") as a
+// run: its scheduled departure (unix s). A device id, or a row of another city, is no run.
+func (c *City) runDeparture(veh string) (int64, bool) {
+	code, ok := strings.CutPrefix(veh, c.Conf.ID+":")
+	if !ok {
+		return 0, false
+	}
+	date, dep, ok := runCode(code)
+	if !ok {
+		return 0, false
+	}
+	base, _, ok := dayBase(date)
+	return base + int64(dep), ok
 }
 
 // statsRoute serves the city's stats files (index and days) and reports whether it handled the

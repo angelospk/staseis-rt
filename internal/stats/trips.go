@@ -55,6 +55,12 @@ type Plan struct {
 	// GTFSHeadways: the headways also measure the GTFS trips, by line and direction_id (a city
 	// without OASA's daily schedule: Thessaloniki, #164).
 	GTFSHeadways bool `json:"gtfs_headways,omitempty"`
+	// Frequency: the day gets the frequency band of each line and direction of Trips (a
+	// citybus.gr city, #167).
+	Frequency bool `json:"frequency,omitempty"`
+	// RunDeparture reads a vehicle code as a run: its scheduled departure (unix s). When set, the
+	// day gets the on-time performance at the origin (a citybus.gr city, #167).
+	RunDeparture func(veh string) (int64, bool) `json:"-"`
 }
 
 // Span is the metres along a trip's shape of its first and last stop; equal when the trip has

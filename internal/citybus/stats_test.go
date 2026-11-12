@@ -115,3 +115,64 @@ func TestStatsEndpoints(t *testing.T) {
 		t.Fatalf("path out of the stats dir: %d", code)
 	}
 }
+
+// The plan of a citybus.gr city opts in to the TCQSM blocks (staseis-rt#167): the frequency of
+// its lines from the timetable, and the on-time performance at the origin from the vehicle codes
+// of its own rows ("t:YYYYMMDD_…_HH_MM").
+func TestStatsPlanOptsInToTheTCQSMBlocks(t *testing.T) {
+	c, _, today, base, _ := runCity(t, t.TempDir(), nil)
+	p, err := c.statsPlan(today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Frequency || p.RunDeparture == nil {
+		t.Fatalf("frequency %v, run departure set %v", p.Frequency, p.RunDeparture != nil)
+	}
+	for _, pt := range p.Trips {
+		if pt.Dir != c.model.Routes["10"].Dir {
+			t.Fatalf("trip %+v: dir of route 10 is %d", pt, c.model.Routes["10"].Dir)
+		}
+	}
+	ymd := strings.ReplaceAll(today, "-", "")
+	for _, x := range []struct {
+		veh  string
+		want int64
+		ok   bool
+	}{
+		{"t:" + ymd + "_10_0100000_17_20", base + t1720, true},
+		{"t:" + ymd + "_10_0100000_25_10", base + 25*3600 + 600, true}, // past midnight
+		{"u:" + ymd + "_10_0100000_17_20", 0, false},                   // another city
+		{ymd + "_10_0100000_17_20", 0, false},
+		{"t:1607413212998552622", 0, false}, // a device id
+	} {
+		got, ok := p.RunDeparture(x.veh)
+		if ok != x.ok || ok && got != x.want {
+			t.Errorf("RunDeparture(%q) = %d, %v; want %d, %v", x.veh, got, ok, x.want, x.ok)
+		}
+	}
+}
+
+func TestRunStatsWritesTheOriginOTP(t *testing.T) {
+	c, _, today, base, _ := runCity(t, t.TempDir(), nil)
+	hdir := t.TempDir()
+	v := c.model.Version
+	veh := "t:" + strings.ReplaceAll(today, "-", "") + "_10_0100000_17_20"
+	at := base + t1720
+	statsHour(t, hdir, at,
+		statsRow(at+60, "t:1", veh, v, "7", 25.1, 50),
+		statsRow(at+90, "t:1", veh, v, "7", 25.11, 150), // leaves at +75 s: on time
+		statsRow(at+300, "t:1", veh, v, "7", 25.13, 2000),
+	)
+	if _, err := c.runStats(hdir, time.Unix(base+30*3600, 0)); err != nil {
+		t.Fatal(err)
+	}
+	var d stats.Day
+	readStats(t, filepath.Join(c.dir, "stats", "days", today+".json"), &d)
+	o := d.OriginOTP
+	if o == nil || o.Runs != 1 || o.Measured != 1 || o.OnTime != 1 || o.Band != "95-100" || len(o.ByLine) != 1 || o.ByLine[0].Line != "t:1" {
+		t.Fatalf("origin_otp %+v", o)
+	}
+	if d.Frequency != nil {
+		t.Fatalf("2 departures a day are no frequency: %+v", d.Frequency)
+	}
+}

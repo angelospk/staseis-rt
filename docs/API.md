@@ -448,6 +448,8 @@ the earlier files, but `index.json` and `latest.json` skip them):
 | `trips` | scheduled trips of the day and how many ran (below); missing when the server had no static GTFS of the day's history |
 | `start_delay` | how late the runs of OASA's daily schedule left (below); missing when no run of the day was measured (every day before the field shipped) |
 | `headways` | regularity (headway adherence) of the high-frequency lines of OASA's daily schedule (below); missing when no direction qualifies (every day before the field shipped) |
+| `frequency` | citybus.gr cities only: scheduled frequency band of each line and direction (below); missing when no direction has 4 daytime departures |
+| `origin_otp` | citybus.gr cities only: on-time performance at the route origin (below); missing when no run of the day was seen |
 
 Speed in km/h = `dist_m / time_s * 3.6`; `time_s` 0 means no speed. Sums, not averages, so
 several days add up exactly. A speed sample is two consecutive fixes of one vehicle on the
@@ -566,6 +568,76 @@ trips of the same direction and stop span also place one, since the matcher can 
 line's trips with one GTFS `direction_id`, across route variants. A bus without working telematics has no pass,
 so two headways merge into one: `mean_headway_s`, `cv_h`, `wait_min`, `ewt_min` and
 `off_headway_share` are biased, usually up, but a missing bus can also hide a bunch and lower them.
+
+### Frequency bands (`frequency`, citybus.gr cities)
+
+```json
+"frequency": {"from_h": 7, "to_h": 21, "min_trips": 4, "by_line": [
+  {"line": "pat:601", "dir": 0, "trips": 28, "headway_min": 30.4, "band": "16-30"}
+]}
+```
+
+From the city's timetable only (TCQSM 4th edition, Exhibit 5-6), so it is there also in the
+cities with no live buses. Athens and Thessaloniki do not have it.
+
+| Field | Meaning |
+|---|---|
+| `from_h`, `to_h` | local hours of the window: departures from 07:00 to before 21:00 count |
+| `min_trips` | a direction with fewer departures in the window is left out (school runs, duplicate entries) |
+| `by_line[]` | one entry per direction of a line, by line then `dir` (0 or 1, the citybus.gr direction 1 or 2). All route variants of a direction count together; two at the same minute are one departure |
+| `trips` | departures in the window |
+| `headway_min` | mean scheduled headway: (last − first departure) / (`trips` − 1), minutes, one decimal |
+| `band` | TCQSM band of `headway_min` rounded to whole minutes: `<=5`, `6-10`, `11-15`, `16-30`, `31-59`, `60`, `>60` |
+
+A daily mean hides a peak: a line every 15 min at the peak and every 60 min at midday reads as
+`31-59`. A city whose timetable has no trip that weekday (Agrinio; Veroia from Wednesday to
+Friday, rt#157) has no `frequency`. JSON encoders write `<` and `>` as `\u003c` and `\u003e`;
+a JSON parser reads them back.
+
+### On-time performance at the origin (`origin_otp`, citybus.gr cities)
+
+```json
+"origin_otp": {"at_m": 100, "max_gap_s": 60, "late_s": 300,
+  "runs": 902, "measured": 728, "on_time": 532, "early": 155, "late": 41, "share": 0.731, "band": "70-79",
+  "by_line": [
+    {"line": "pat:601", "runs": 40, "measured": 31, "on_time": 22, "early": 6, "late": 3, "share": 0.71}
+  ]}
+```
+
+TCQSM 4th edition, Exhibit 5-8: a departure from the route origin 0 to 5 min late is on time. An
+early departure is not on time (a passenger who comes on time misses the bus), and is counted
+apart in `early`.
+
+| Field | Meaning |
+|---|---|
+| `at_m` | the departure is the time the bus crosses this metre of the route's shape (it left the stand) |
+| `max_gap_s` | the two sightings around that crossing must be at most this far apart; the time is interpolated between them |
+| `late_s` | a departure 0 to this many seconds after the schedule is on time |
+| `runs` | runs of the day seen with a run code, measured or not |
+| `measured` | runs whose departure was placed (`on_time + early + late = measured`) |
+| `on_time`, `early`, `late` | measured runs that left 0 to `late_s` s after the schedule, before it, or later |
+| `share` | `on_time / measured`, three decimals; missing when nothing was measured |
+| `band` | TCQSM band of `share` in whole percent, rounded down: `95-100`, `90-94`, `80-89`, `70-79`, `<70`; missing with `share` |
+| `by_line[]` | every line with a run, by id: `line` and the same counts and `share` |
+
+A run is a vehicle code of the trip-slot form (`pat:20261112_4_0100000_17_20`: the 17:20 run of
+the service day 2026-11-12); its scheduled departure is the time in the code, so no timetable
+match is needed. A bus with a device id (a long number) has no run and does not count, even when
+the server matched it to a run. A run counts for the day of its scheduled departure. It is
+measured when the sighting before the crossing of `at_m` and the one after it are at most
+`max_gap_s` apart, and the crossing is from 10 min before to 60 min after the schedule. When the
+bus crosses more than once (GPS jitter at the stand), the first crossing counts. A run first seen
+past `at_m`, or with a gap, is counted in `runs` only.
+
+Limits: a citybus.gr row carries the time the stop board was read, not the GPS time of the
+position, and a position can be up to 120 s old; the lag is not measured
+([#168](https://github.com/angelospk/staseis-rt/issues/168)). A lag makes a departure look later
+than it was, which moves runs from `early` to `on_time` or from `on_time` to `late`. That is why
+mid-route and terminal on-time performance (window −1 to +5 min) are not given. `at_m` is metre
+100 of the shape, not 100 m after the first stop: on the few routes whose first stop is further
+along the shape (in Kozani about half of them, 50–150 m), a bus that waits at the stand has
+already crossed it, so its run can look early. Some codes do not match the timetable (Kavala's
+runs leave 9–21 min before their code).
 
 ## GTFS-Realtime details
 

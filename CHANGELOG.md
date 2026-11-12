@@ -25,6 +25,14 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
   fix-history CSV format ([#142](https://github.com/angelospk/staseis-rt/issues/142)).
 
 ### Statistics
+- citybus.gr cities: the daily stats gain two TCQSM 4th-edition blocks. `frequency` gives each
+  line and direction its mean scheduled headway from 07:00 to 21:00 and its Exhibit 5-6 band, from
+  the timetable only (also in the cities with no live buses). `origin_otp` gives the on-time
+  performance at the route origin (Exhibit 5-8, 0 to +5 min): the scheduled departure is the time
+  in the vehicle code, the actual one the crossing of shape metre 100 between two sightings at most
+  60 s apart; early departures are counted apart and are not on time. Per line and per city, with
+  the city's band. Athens and Thessaloniki days do not change
+  ([#167](https://github.com/angelospk/staseis-rt/issues/167)).
 - `headways` in the daily stats follows TCQSM 4th edition (TCRP Research Report 262): `cv_h` divides
   by the mean observed headway (was the median), only directions at a mean headway of 10 min or less
   are listed (was a median of 12 min), and each direction gains `wait_min` (TCQSM Eq. 5-1),
