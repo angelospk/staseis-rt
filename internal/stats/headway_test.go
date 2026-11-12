@@ -8,28 +8,42 @@ import (
 
 func TestHeadwayStats(t *testing.T) {
 	even := []float64{300, 300, 300, 300, 300, 300, 300, 300}
-	// Alternating 200/400: mean 300, median 300, stddev 100.
+	// Alternating 200/400: mean 300, stddev 100, no headway off by more than 150.
 	alt := []float64{200, 400, 200, 400, 200, 400, 200, 400}
+	// Bunched pairs 60/540: mean 300, stddev 240, every headway off by more than 150.
+	bunched := []float64{60, 540, 60, 540, 60, 540, 60, 540}
+	// Median 100, mean 325: cv_h divides by the mean (TCQSM), not the median.
+	skew := []float64{100, 100, 100, 100, 100, 700, 700, 700}
 	for _, tc := range []struct {
-		name         string
-		hs           []float64
-		ok           bool
-		ref, cv, ewt float64
+		name string
+		hs   []float64
+		ok   bool
+		want HeadwayStat
 	}{
-		{"seven headways are skipped", even[:7], false, 0, 0, 0},
-		{"regular", even, true, 300, 0, 0},
-		// EWT = sum(h^2)/(2 sum(h)) - 150 = 800000/4800 - 150 s
-		{"alternating", alt, true, 300, 100.0 / 300, (100000.0/600 - 150) / 60},
-		// odd count: median is the middle value
-		{"odd", []float64{100, 200, 300, 400, 500, 600, 700, 800, 900}, true, 500, math.Sqrt(200000.0/3) / 500,
-			(2850000.0/9000 - 250) / 60},
+		{"seven headways are skipped", even[:7], false, HeadwayStat{}},
+		{"regular", even, true, HeadwayStat{Mean: 300, Median: 300, WaitMin: 2.5}},
+		{"alternating", alt, true, HeadwayStat{Mean: 300, Median: 300, CV: 1.0 / 3,
+			EWTMin: 0.5 * 300 / 9 / 60, WaitMin: 0.5 * 300 * (1 + 1.0/9) / 60}},
+		{"bunched", bunched, true, HeadwayStat{Mean: 300, Median: 300, CV: 0.8,
+			EWTMin: 0.5 * 300 * 0.64 / 60, WaitMin: 0.5 * 300 * 1.64 / 60, OffShare: 1}},
+		{"skewed", skew, true, HeadwayStat{Mean: 325, Median: 100, CV: math.Sqrt(84375) / 325,
+			EWTMin: 0.5 * 84375 / 325 / 60, WaitMin: (0.5*325 + 0.5*84375/325) / 60, OffShare: 1}},
+		// odd count: median is the middle value; |h-500| > 250 for 100, 200, 800, 900
+		{"odd", []float64{100, 200, 300, 400, 500, 600, 700, 800, 900}, true, HeadwayStat{Mean: 500, Median: 500,
+			CV: math.Sqrt(200000.0/3) / 500, EWTMin: 0.5 * (200000.0 / 3) / 500 / 60,
+			WaitMin: (250 + 0.5*(200000.0/3)/500) / 60, OffShare: 4.0 / 9}},
 	} {
-		ref, cv, ewt, ok := HeadwayStats(tc.hs)
+		got, ok := HeadwayStats(tc.hs)
 		if ok != tc.ok {
 			t.Fatalf("%s: ok %v, want %v", tc.name, ok, tc.ok)
 		}
-		if math.Abs(ref-tc.ref) > 1e-9 || math.Abs(cv-tc.cv) > 1e-9 || math.Abs(ewt-tc.ewt) > 1e-9 {
-			t.Errorf("%s: ref %v cv %v ewt %v, want %v %v %v", tc.name, ref, cv, ewt, tc.ref, tc.cv, tc.ewt)
+		w := tc.want
+		for _, f := range [][3]float64{{got.Mean, w.Mean}, {got.Median, w.Median}, {got.CV, w.CV},
+			{got.EWTMin, w.EWTMin}, {got.WaitMin, w.WaitMin}, {got.OffShare, w.OffShare}} {
+			if math.Abs(f[0]-f[1]) > 1e-9 {
+				t.Errorf("%s: got %+v, want %+v", tc.name, got, w)
+				break
+			}
 		}
 	}
 }
@@ -74,7 +88,8 @@ func TestTripCounterHeadways(t *testing.T) {
 	if h == nil || len(h.ByLine) != 1 {
 		t.Fatalf("got %+v", h)
 	}
-	if l := h.ByLine[0]; l.N != 8 || l.RefMedS != 300 || l.CVh != 0 || l.EWTMin != 0 || l.LOS != "A" {
+	if l := h.ByLine[0]; l.N != 8 || l.MedianS != 300 || l.MeanS != 300 || l.CVh != 0 || l.EWTMin != 0 ||
+		l.WaitMin != 2.5 || l.OffShare != 0 || l.LOS != "A" {
 		t.Errorf("got %+v", l)
 	}
 	for _, b := range mk(9).buses {
@@ -84,7 +99,7 @@ func TestTripCounterHeadways(t *testing.T) {
 	}
 }
 
-// A direction with a median headway over 12 min is not high-frequency.
+// A direction with a mean headway over 10 min is not high-frequency (TCQSM Exhibit 5-9).
 func TestHeadwaysLowFrequency(t *testing.T) {
 	loc, _ := time.LoadLocation(TZ)
 	start, _, _ := Bounds("2026-11-02", loc)
@@ -92,7 +107,7 @@ func TestHeadwaysLowFrequency(t *testing.T) {
 	plan.UseDaily([]DailyDir{{Line: "L", Dir: 0, Trips: map[string]Span{"T": {0, 1000}}}})
 	c := newTripCounter(plan)
 	for i := 0; i < 10; i++ {
-		t0 := time.Date(2026, 11, 2, 8, 0, 0, 0, loc).Unix() + int64(i)*15*60
+		t0 := time.Date(2026, 11, 2, 8, 0, 0, 0, loc).Unix() + int64(i)*11*60
 		veh := string(rune('a' + i))
 		c.add(t0, veh, "T", "v1", 400)
 		c.add(t0+60, veh, "T", "v1", 600)

@@ -530,9 +530,14 @@ so `runs` is a sample, not every run.
 
 ```json
 "headways": {"from_h": 7, "to_h": 21, "at": 0.5, "by_line": [
-  {"line": "040", "dir": 0, "n": 96, "ref_headway_median_s": 480, "mean_headway_s": 512, "cv_h": 0.412, "ewt_min": 1.35, "los": "D"}
+  {"line": "040", "dir": 0, "n": 96, "mean_headway_s": 512, "median_headway_s": 480, "cv_h": 0.412, "wait_min": 4.99, "ewt_min": 0.72, "off_headway_share": 0.208, "los": "D"}
 ]}
 ```
+
+The measures follow TCQSM 4th edition (TCRP Research Report 262, 2026, chapter 5), with one
+difference: the reference is the mean **observed** headway, because the scheduled headway at
+mid-route is not known. So `cv_h` measures how even the buses ran, not whether they kept the
+promised frequency.
 
 | Field | Meaning |
 |---|---|
@@ -540,17 +545,23 @@ so `runs` is a sample, not every run.
 | `at` | the reference point: share of the route (0.5 = mid-route) a bus passes |
 | `by_line[]` | one entry per direction of a line (`dir` 0 Go, 1 Come), by line then `dir` |
 | `n` | headways measured (at least 8) |
-| `ref_headway_median_s` | median observed headway, the reference (at most 720 s: only high-frequency directions are listed) |
-| `mean_headway_s` | mean observed headway |
-| `cv_h` | stddev of the headways / `ref_headway_median_s` (TCQSM headway adherence, with the median observed headway in place of the scheduled one) |
-| `ewt_min` | excess wait time in minutes: sum(h²) / (2 sum(h)) - ref / 2 (can be slightly negative when the mean is below the median) |
-| `los` | TCQSM level of service of `cv_h`: A ≤ 0.21, B ≤ 0.30, C ≤ 0.39, D ≤ 0.52, E ≤ 0.74, F above |
+| `mean_headway_s` | mean observed headway (at most 600 s: only directions at 10 min or less are listed, as in TCQSM Exhibit 5-9) |
+| `median_headway_s` | median observed headway |
+| `cv_h` | headway adherence: population stddev of the headways / `mean_headway_s` |
+| `wait_min` | average wait in minutes of a passenger who arrives at random: 0.5 · mean · (1 + cv_h²) (TCQSM Eq. 5-1) |
+| `ewt_min` | excess wait in minutes: `wait_min` minus half the mean headway (0 for perfectly even buses) |
+| `off_headway_share` | share of headways off the mean by more than half of it, either bunched (too short) or a gap (too long); measured, not derived from `cv_h` |
+| `los` | band of `cv_h`, TCQSM Exhibit 5-9: A ≤ 0.21 (like clockwork), B ≤ 0.30 (slightly off headway), C ≤ 0.39 (often off headway), D ≤ 0.52 (irregular, some bunching), E ≤ 0.74 (frequent bunching), F above (most bunched). The 4th edition gives the bands without letters; the letters are ours |
+
+Days written before 2026-11-13 used the median as the reference and 12 min as the limit: they
+have `ref_headway_median_s` and no `median_headway_s`, `wait_min` or `off_headway_share`.
 
 A pass is the time a bus run of a daily direction (same bus runs as `trips`) crosses `at` of the
 route, interpolated between two fixes at most 5 min apart; a run first seen past the point has
 no pass. Headways are the gaps between consecutive passes of the direction in the window. Only
-lines planned from OASA's daily schedule (`oasa_daily`). A bus without working telematics makes a
-long gap, so `cv_h` and `ewt_min` are upper bounds.
+lines planned from OASA's daily schedule (`oasa_daily`). A bus without working telematics has no pass,
+so two headways merge into one: `mean_headway_s`, `cv_h`, `wait_min`, `ewt_min` and
+`off_headway_share` are biased, usually up, but a missing bus can also hide a bunch and lower them.
 
 ## GTFS-Realtime details
 
