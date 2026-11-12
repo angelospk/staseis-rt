@@ -72,25 +72,35 @@ City facts that change what is possible:
 
 ## What the user sees (web `athens-transit-map`, app `athens-transit-app`)
 
-Today (web, 2026-11-13, `src/lib/quality.ts`, `src/lib/ui/LineCard.svelte`, web 1f0fd68): the line card shows
-one «Χθες» pill under its header, from yesterday's day file of the city (fetched once per page load),
-only when there is data (no grey pill):
+Today (web, design v3 of 2026-11-13, mockup `athens-transit-map/docs/mockups/quality-v3.html`;
+`src/lib/quality.ts`, `src/lib/ui/QualityPill.svelte`, `src/lib/ui/LineCard.svelte`): the line card
+shows one neutral pill under its header, only when there is data (no grey pill). It reads yesterday's
+day file of the city; until that file is written (mornings, until about 13:00) it reads the day before
+and says «Προχθές» instead of «Χθες». Neither file: no pill.
 
+- The level is a 3-bar meter, not a dot: 3 green bars = normal, 2 yellow (`--late1`), 1 red
+  (`--late3`); the unlit bars are muted. The words keep `--fg` / `--muted`, for 4.5:1 in light and dark.
 - Frequent direction (a `headways` entry for the line and the shown direction; the card's direction
-  is matched to the stats `dir` through the line's timetable headsign): `cv_h` ≤ 0.39 green
-  «Κανονικά χθες», ≤ 0.74 yellow «Αραιά χθες», above red «Πολύ αραιά χθες», then
-  «· περίμενες ~{wait_min}′», plus «(κανονικά ~{mean/2}′)» when not green.
-- Sparse citybus.gr line (`origin_otp.by_line`, per line, ≥ 5 measured runs): ≥ 80 % green
-  «Συνήθως στην ώρα του», 70–79 % yellow «Αργεί συχνά», < 70 % red «Αργεί πολύ», then
-  «· χθες N στα 10 δρομολόγια στην ώρα τους».
+  is matched to the stats `dir` through the line's timetable headsign): `cv_h` ≤ 0.39 three bars,
+  ≤ 0.74 two, above one. Text «Χθες · αναμονή ~{wait_min}′ (κανονικά ~{mean/2}′)», to the half
+  minute; no brackets at three bars.
+- Sparse citybus.gr line (`origin_otp.by_line`, per line, ≥ 5 measured runs): ≥ 80 % three bars,
+  70–79 % two, < 70 % one. Text «Χθες · N στα 10 δρομολόγια στην ώρα».
+- A tap opens a panel under the pill. Sparse: the day's split at the origin (νωρίτερα / στην ώρα /
+  πάνω από 5′ αργά, with counts), the on-time share of the last 7 days with a dashed 80 % line, and
+  the note «Στην ώρα: 0 έως 5′ μετά το πρόγραμμα. Όποιο φεύγει νωρίτερα μετράει εκτός, γιατί όποιος
+  έρχεται στην ώρα το χάνει.» Frequent: the wait of the last 7 days with a dashed line at the
+  even-service wait (mean/2), and the passes and mean headway of the day. The 7 day files load
+  only when the panel opens; a day without data is an empty slot.
 - Athens and Thessaloniki sparse lines: no pill (no OTP yet). Day files before 2026-11-12 have no
-  `wait_min`: no pill. Each morning, until the day file is written, there is no pill.
-- The colour is in the dot and the tint only (`--ontime`, `--late1`, `--late3`); the words keep
-  the text colour, for 4.5:1 contrast in light and dark.
+  `wait_min`: no pill for that day.
+- The direction control under the pill is always the two-segment control; the header shows the
+  line chip and the line name.
 
 The app shows none of it yet. The web stats view (`src/lib/ui/StatsView.svelte`) shows trips run, buses on the road, network speed and slowest/fastest lines.
 
-Agreed design (Harold, 2026-11-13; mockup `athens-transit-map/docs/mockups/quality-v2.html`;
+Agreed design (Harold, 2026-11-13; mockup `athens-transit-map/docs/mockups/quality-v2.html`, refined
+by v3 above: neutral copy, level meter instead of words like «Αραιά»;
 the first, rejected one is `quality-v1-rejected.html`: too much information, unclear words):
 
 - **One scale, three levels, the same meaning everywhere**: green = normal, yellow = a little
