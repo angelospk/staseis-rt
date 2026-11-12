@@ -34,7 +34,7 @@ type Headways struct {
 // (not known at the reference point).
 type LineHeadway struct {
 	Line     string  `json:"line"`
-	Dir      int     `json:"dir"` // 0 Go, 1 Come (OASA daily schedule)
+	Dir      int     `json:"dir"` // 0 Go, 1 Come (OASA daily schedule); GTFS direction_id (GTFSHeadways)
 	N        int     `json:"n"`   // headways measured
 	MeanS    int64   `json:"mean_headway_s"`
 	MedianS  int64   `json:"median_headway_s"`
@@ -102,30 +102,42 @@ func LOS(cv float64) string {
 	return "F"
 }
 
-// headways sums the passes of the daily directions: those in [HeadwayFromH, HeadwayToH) of the
-// local day starting at start. nil when no direction qualifies.
+// headways sums the passes of the daily directions, and with GTFSHeadways of the GTFS trips by
+// line and direction_id: those in [HeadwayFromH, HeadwayToH) of the local day starting at start.
+// nil when no direction qualifies.
 func (c *tripCounter) headways(start time.Time, loc *time.Location) *Headways {
 	from := time.Date(start.Year(), start.Month(), start.Day(), HeadwayFromH, 0, 0, 0, loc).Unix()
 	to := time.Date(start.Year(), start.Month(), start.Day(), HeadwayToH, 0, 0, 0, loc).Unix()
-	byDir := make([][]int64, len(c.plan.Daily))
-	for _, b := range c.buses {
-		if b.pass >= from && b.pass < to {
-			byDir[b.key.dir] = append(byDir[b.key.dir], b.pass)
+	type dirKey struct {
+		line string
+		dir  int
+	}
+	passes := map[dirKey][]int64{}
+	keep := func(k dirKey, p int64) {
+		if p >= from && p < to {
+			passes[k] = append(passes[k], p)
 		}
 	}
+	for _, b := range c.buses {
+		d := c.plan.Daily[b.key.dir]
+		keep(dirKey{d.Line, d.Dir}, b.pass)
+	}
+	for k, p := range c.tripPass {
+		pt := c.plan.Trips[k]
+		keep(dirKey{pt.Line, pt.Dir}, p)
+	}
 	out := &Headways{FromH: HeadwayFromH, ToH: HeadwayToH, At: HeadwayAt, ByLine: []LineHeadway{}}
-	for i, ps := range byDir {
+	for k, ps := range passes {
 		sort.Slice(ps, func(a, b int) bool { return ps[a] < ps[b] })
 		hs := make([]float64, 0, len(ps))
-		for k := 1; k < len(ps); k++ {
-			hs = append(hs, float64(ps[k]-ps[k-1]))
+		for i := 1; i < len(ps); i++ {
+			hs = append(hs, float64(ps[i]-ps[i-1]))
 		}
 		st, ok := HeadwayStats(hs)
 		if !ok || st.Mean > HeadwayMaxRef.Seconds() {
 			continue
 		}
-		d := c.plan.Daily[i]
-		out.ByLine = append(out.ByLine, LineHeadway{Line: d.Line, Dir: d.Dir, N: len(hs),
+		out.ByLine = append(out.ByLine, LineHeadway{Line: k.line, Dir: k.dir, N: len(hs),
 			MeanS: int64(math.Round(st.Mean)), MedianS: int64(math.Round(st.Median)), CVh: round3(st.CV),
 			WaitMin: math.Round(st.WaitMin*100) / 100, EWTMin: math.Round(st.EWTMin*100) / 100,
 			OffShare: round3(st.OffShare), LOS: LOS(st.CV)})

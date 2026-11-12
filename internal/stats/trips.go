@@ -37,6 +37,7 @@ const (
 type PlanTrip struct {
 	ID    string  `json:"id"`
 	Line  string  `json:"line"`
+	Dir   int     `json:"dir"`   // GTFS direction_id
 	Start int64   `json:"start"` // unix s
 	End   int64   `json:"end"`
 	FromM float64 `json:"from_m"`
@@ -51,6 +52,9 @@ type Plan struct {
 	Source  string     `json:"source,omitempty"` // where the GTFS trips come from; "" = SourceGTFS
 	Trips   []PlanTrip `json:"trips"`
 	Daily   []DailyDir `json:"daily,omitempty"`
+	// GTFSHeadways: the headways also measure the GTFS trips, by line and direction_id (a city
+	// without OASA's daily schedule: Thessaloniki, #164).
+	GTFSHeadways bool `json:"gtfs_headways,omitempty"`
 }
 
 // Span is the metres along a trip's shape of its first and last stop; equal when the trip has
@@ -160,7 +164,7 @@ func NewPlan(f *gtfs.Feed, version, date string, loc *time.Location) (*Plan, err
 			if s.Before(start) || !s.Before(end) {
 				continue
 			}
-			pt := PlanTrip{ID: t.ID, Line: f.Line(t), Start: s.Unix(),
+			pt := PlanTrip{ID: t.ID, Line: f.Line(t), Dir: int(t.Dir), Start: s.Unix(),
 				End: sd.Add(time.Duration(f.End(t)) * time.Second).Unix()}
 			sp := SpanOf(m, t)
 			pt.FromM, pt.ToM = sp.FromM, sp.ToM
@@ -186,7 +190,21 @@ type tripCounter struct {
 	dailyOf       map[string]int     // GTFS trip id -> index in plan.Daily (the first direction with it)
 	cur           map[busKey]*busRun // the latest bus run of each vehicle on a daily direction
 	buses         []*busRun          // all bus runs on the daily directions
+	tripAt        map[tripVeh]tripAt // GTFSHeadways: the last measured fix of a vehicle on a plan trip
+	tripPass      []int64            // GTFSHeadways: the earliest pass of each plan trip (0: none)
 	stamped, ours int                // rows of the day with a feed version, and those of the plan's
+}
+
+// tripVeh is a vehicle on a plan trip (index in plan.Trips).
+type tripVeh struct {
+	k   int
+	veh string
+}
+
+// tripAt is the share of a trip's span at a vehicle's last measured fix, at time t.
+type tripAt struct {
+	at float64
+	t  int64
 }
 
 type tripSeen struct {
@@ -223,6 +241,9 @@ func (b *busRun) left() int64 {
 func newTripCounter(plan *Plan) *tripCounter {
 	c := &tripCounter{plan: plan, byID: map[string][]int{}, state: make([]tripSeen, len(plan.Trips)),
 		dailyOf: map[string]int{}, cur: map[busKey]*busRun{}}
+	if plan.GTFSHeadways {
+		c.tripAt, c.tripPass = map[tripVeh]tripAt{}, make([]int64, len(plan.Trips))
+	}
 	for i, pt := range plan.Trips {
 		c.byID[pt.ID] = append(c.byID[pt.ID], i)
 	}
@@ -264,6 +285,18 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 			continue
 		}
 		c.state[k].note(sm, Span{pt.FromM, pt.ToM})
+		if c.tripPass != nil && sm >= 0 && pt.ToM > pt.FromM {
+			share := min(max((sm-pt.FromM)/(pt.ToM-pt.FromM), 0), 1)
+			kv := tripVeh{k, veh}
+			prev, ok := c.tripAt[kv]
+			if ok && t <= prev.t {
+				continue // a copy of an older row
+			}
+			if p, crossed := crossing(prev.at, prev.t, share, t); ok && crossed && (c.tripPass[k] == 0 || p < c.tripPass[k]) {
+				c.tripPass[k] = p
+			}
+			c.tripAt[kv] = tripAt{share, t}
+		}
 	}
 	if d, ok := c.dailyOf[trip]; ok && d >= 0 {
 		sp := c.plan.Daily[d].Trips[trip]
@@ -284,9 +317,8 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 			c.buses = append(c.buses, b)
 		}
 		if t >= b.last && share >= 0 {
-			if b.pass == 0 && b.at >= 0 && b.at < HeadwayAt && share >= HeadwayAt && t > b.atT &&
-				t-b.atT <= int64(HeadwayMaxGap/time.Second) {
-				b.pass = b.atT + int64(math.Round(float64(t-b.atT)*(HeadwayAt-b.at)/(share-b.at)))
+			if p, ok := crossing(b.at, b.atT, share, t); b.pass == 0 && ok {
+				b.pass = p
 			}
 			b.at, b.atT = share, t
 		}
@@ -299,6 +331,16 @@ func (c *tripCounter) add(t int64, veh, trip, gtfsVer string, sm float64) {
 		}
 		b.seen.note(share, b.span)
 	}
+}
+
+// crossing is when a bus at share at0 at time t0 (at0 < 0: no fix) and at share at1 at t1 passed
+// HeadwayAt of the route, interpolated; false when it did not cross it between the two fixes or
+// they are more than HeadwayMaxGap apart.
+func crossing(at0 float64, t0 int64, at1 float64, t1 int64) (int64, bool) {
+	if at0 < 0 || at0 >= HeadwayAt || at1 < HeadwayAt || t1 <= t0 || t1-t0 > int64(HeadwayMaxGap/time.Second) {
+		return 0, false
+	}
+	return t0 + int64(math.Round(float64(t1-t0)*(HeadwayAt-at0)/(at1-at0))), true
 }
 
 // stamp counts one row of the day (matched or not) by the feed version it was written with.

@@ -543,7 +543,7 @@ promised frequency.
 |---|---|
 | `from_h`, `to_h` | local hours of the window: passes from 07:00 to before 21:00 count |
 | `at` | the reference point: share of the route (0.5 = mid-route) a bus passes |
-| `by_line[]` | one entry per direction of a line (`dir` 0 Go, 1 Come), by line then `dir` |
+| `by_line[]` | one entry per direction of a line, by line then `dir`. Athens: `dir` 0 Go, 1 Come of OASA's daily schedule. Thessaloniki: `dir` is the GTFS `direction_id` |
 | `n` | headways measured (at least 8) |
 | `mean_headway_s` | mean observed headway (at most 600 s: only directions at 10 min or less are listed, as in TCQSM Exhibit 5-9) |
 | `median_headway_s` | median observed headway |
@@ -558,8 +558,11 @@ have `ref_headway_median_s` and no `median_headway_s`, `wait_min` or `off_headwa
 
 A pass is the time a bus run of a daily direction (same bus runs as `trips`) crosses `at` of the
 route, interpolated between two fixes at most 5 min apart; a run first seen past the point has
-no pass. Headways are the gaps between consecutive passes of the direction in the window. Only
-lines planned from OASA's daily schedule (`oasa_daily`). A bus without working telematics has no pass,
+no pass. Headways are the gaps between consecutive passes of the direction in the window. In
+Athens, only lines planned from OASA's daily schedule (`oasa_daily`). Thessaloniki has no daily
+schedule: there a pass is the time a GTFS trip's matched bus crosses `at` of the trip's own stop
+span (one pass per trip, the earliest when two buses were matched to it), and a direction is the
+line's trips with one GTFS `direction_id`, across route variants. A bus without working telematics has no pass,
 so two headways merge into one: `mean_headway_s`, `cv_h`, `wait_min`, `ewt_min` and
 `off_headway_share` are biased, usually up, but a missing bus can also hide a bunch and lower them.
 

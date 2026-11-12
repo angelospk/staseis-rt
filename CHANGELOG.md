@@ -30,6 +30,9 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
   are listed (was a median of 12 min), and each direction gains `wait_min` (TCQSM Eq. 5-1),
   `off_headway_share` (headways off the mean by more than half) and `median_headway_s`, which
   replaces `ref_headway_median_s` ([#162](https://github.com/angelospk/staseis-rt/issues/162)).
+- Thessaloniki daily stats gain the `headways` block. OASTH has no daily schedule, so the passes
+  come from the GTFS trips: each trip's mid-route pass from its matched fixes, by line and GTFS
+  `direction_id` ([#164](https://github.com/angelospk/staseis-rt/issues/164)).
 - The `trips` block of the daily stats plans from OASA's daily schedule when the static GTFS has
   expired: one planned trip per OASA run, paired with the buses that left near its time, instead
   of the trips of the summer timetable. A line without a daily schedule keeps the GTFS plan.
