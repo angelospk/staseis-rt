@@ -44,8 +44,10 @@ Last update: 2026-11-13 (live levels, #173).
   type are known.
 - A stop pass is the crossing of the stop's metre along the shape, interpolated between two fixes
   at most 600 s apart; the first two stops of a Pattern give no gap (buses wait there, as in
-  `usual`). Segment traversals are pooled across lines by stop pair: per line only 9 % of the
-  segment ratings had 2 buses in 15 min; pooled, 47 % (replay below).
+  `usual`). A fix pair faster than 20 m/s (+100 m) is a GPS jump and starts the run over; the same
+  bus at the same stop again within 10 min is no pass. Segment traversals are pooled across lines
+  by stop pair, when the two stops are as far apart along both shapes (±20 %, the same road): per
+  line only 9 % of the segment ratings had 2 buses in 15 min; pooled, 47 % (replay below).
 - The gap changes only when a bus passes a stop: a bus stuck between two stops keeps its last level.
 
 Replay of real history (`atrt quality-replay`, Tuesday 2026-10-27, 15 training weekdays, GTFS
@@ -53,8 +55,8 @@ Replay of real history (`atrt quality-replay`, Tuesday 2026-10-27, 15 training w
 
 | Hour | Vehicle fixes: headway basis (normal / worse / much worse / unknown) | schedule basis (normal / worse / much worse) | Segment ratings every 5 min (normal / worse / much worse / unknown) |
 |---|---|---|---|
-| 08:00 | 1614 / 992 / 1348 / 1751 (bunched 340) | 10063 / 11297 / 11048 | 51675 / 4772 / 383 / 63232 |
-| 18:00 | 162 / 167 / 859 / 275 (bunched 215) | 7859 / 8519 / 11040 | 36879 / 7423 / 734 / 63727 |
+| 08:00 | 1896 / 1176 / 1490 / 2137 (bunched 350) | 9616 / 11004 / 10784 | 51486 / 4789 / 385 / 63140 |
+| 18:00 | 261 / 232 / 714 / 426 (bunched 264) | 7718 / 8484 / 11043 | 36755 / 7424 / 735 / 63521 |
 
 The schedule basis is pessimistic in this replay: those days ran on an expired GTFS, and the old
 history has no `run_start`, so the delays are against the GTFS and not against OASA's daily
@@ -101,9 +103,10 @@ City facts that change what is possible:
   `deploy/atrt-history-release.service` exists. Without it, history older than 30 days is lost
   and past days cannot be recomputed (`atrt stats --force`).
 - Live quality (#173), measured on the replay of 2026-10-27 08:00 (48 887 fixes, 1074 buses):
-  8.5 µs per fix (the tracker, the usual lookup with its hourly cache, the level), about 0.1 ms
-  CPU per second of Athens traffic; rating every segment of every shape takes 2 ms. Memory:
-  +8.7 MB (36 678 stop passes, 38 450 traversals, the usual rows of 5748 stops). Athens runs in a
+  14 µs per fix (the tracker, the usual lookup with its hourly cache, the level), about 0.15 ms
+  CPU per second of Athens traffic; rating every segment of every shape takes 3.6 ms. Memory:
+  +11.6 MB (35 751 stop passes, 38 322 traversals, the usual rows of the stops looked up in two
+  hours). Athens runs in a
   200 MB container (`compose.yaml`); oracle-vm (citybus) gets none of it.
 - Day files are written once after the day ends. A changed formula applies to new days only,
   unless old days are rewritten with `--force` (production; ask Harold).

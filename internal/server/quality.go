@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -80,12 +81,13 @@ func (w *world) liveStops(t *gtfs.Trip, g *geo.Geometry) []quality.Stop {
 	return out
 }
 
-// liveQuality feeds the matched fixes of a poll to the tracker and rates each vehicle. A vehicle
+// liveQuality feeds the matched fixes of a poll to the tracker, then rates each vehicle (after
+// every fix of the poll is in: a late pass can change the gap of the bus behind it). A vehicle
 // not matched, waiting at its first stop or not placed on its trip's shape is unknown. Call with
 // a.matchMu held, after the daily shifts (delay_s is final).
 func (a *App) liveQuality(w *world, results []match.Result, vehicles []Vehicle) []quality.VehicleLevel {
 	out := make([]quality.VehicleLevel, len(results))
-	now := a.now()
+	fed := make([]bool, len(results))
 	for i := range results {
 		r := &results[i]
 		out[i] = quality.VehicleLevel{Level: quality.Unknown}
@@ -97,14 +99,22 @@ func (a *App) liveQuality(w *world, results []match.Result, vehicles []Vehicle) 
 		if t.Shape < 0 || g == nil || !g.FromShape {
 			continue
 		}
-		line, head := w.feed.Line(t), w.feed.Headsign(t)
-		a.live.Observe(quality.Fix{Vehicle: r.VehicleID, Trip: t.ID, Line: line, Headsign: head,
-			Shape: w.feed.Shapes[t.Shape].ID, Stops: w.liveStops(t, g), S: r.Along, T: r.Time.Unix()})
-		st, ok := a.live.State(r.VehicleID, t.ID)
+		a.live.Observe(quality.Fix{Vehicle: r.VehicleID, Trip: t.ID, Line: w.feed.Line(t), Headsign: w.feed.Headsign(t),
+			Shape: w.feed.Shapes[t.Shape].ID, Pattern: strconv.Itoa(int(t.Pattern)), Stops: w.liveStops(t, g),
+			S: r.Along, T: r.Time.Unix()})
+		fed[i] = true
+	}
+	now := a.now()
+	for i := range results {
+		if !fed[i] {
+			continue
+		}
+		t := w.feed.Trip(results[i].Trip)
+		st, ok := a.live.State(results[i].VehicleID, t.ID)
 		if !ok || st.RefStop == "" {
 			continue
 		}
-		out[i] = quality.Vehicle(a.usualHeadway(st.RefStop, line, head, now), st.Gap, vehicles[i].DelayS)
+		out[i] = quality.Vehicle(a.usualHeadway(st.RefStop, w.feed.Line(t), w.feed.Headsign(t), now), st.Gap, vehicles[i].DelayS)
 	}
 	return out
 }

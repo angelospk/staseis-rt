@@ -301,6 +301,7 @@ func (a *App) SetFeed(f *gtfs.Feed, m *release.Manifest) {
 	a.w = w
 	a.mu.Unlock()
 	a.motion = newMotion(a.roads) // positions along the old feed's shapes mean nothing now
+	a.live.Reset()                // so do its stop passes: trip and shape ids may be reused for other geometry
 	// Trip ids of the old feed mean nothing either. Cleared before matchMu opens, so a poll that
 	// starts right after cannot record its matches into a map that is dropped a moment later.
 	a.forgetSeen()

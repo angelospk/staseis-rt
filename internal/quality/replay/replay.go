@@ -6,6 +6,7 @@ package replay
 import (
 	"compress/gzip"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -88,15 +89,16 @@ func Run(cfg Config) (*Result, error) {
 	runtime.GC()
 	res.HeapBefore = heap()
 	k := quality.NewTracker()
-	cache := map[string][]usual.Row{}
+	cache := map[[2]string][]usual.Row{} // (stop, local hour), as the server's usualCache
 	lookup := func(stop, line, head string, now time.Time) quality.Usual {
 		if res.UsualDays < usual.MinDays {
 			return quality.Usual{}
 		}
-		rs, ok := cache[stop]
+		key := [2]string{stop, now.In(gtfs.Athens).Format("2006-01-02T15")}
+		rs, ok := cache[key]
 		if !ok {
 			rs = st.Query(stop, now)
-			cache[stop] = rs
+			cache[key] = rs
 		}
 		for _, r := range rs {
 			if r.Line == line && r.Headsign == head && r.HeadwayMin != nil {
@@ -158,7 +160,8 @@ func Run(cfg Config) (*Result, error) {
 		shapes[r.shape] = true
 		line, head := cfg.Feed.Line(t), cfg.Feed.Headsign(t)
 		start := time.Now()
-		k.Observe(quality.Fix{Vehicle: r.veh, Trip: t.ID, Line: line, Headsign: head, Shape: r.shape, Stops: ss, S: r.s, T: r.t})
+		k.Observe(quality.Fix{Vehicle: r.veh, Trip: t.ID, Line: line, Headsign: head, Shape: r.shape,
+			Pattern: strconv.Itoa(int(t.Pattern)), Stops: ss, S: r.s, T: r.t})
 		res.Observed++
 		var lv quality.VehicleLevel
 		state, ok := k.State(r.veh, t.ID)
@@ -239,13 +242,20 @@ func usualStore(cfg Config) (*usual.Store, error) {
 	return st, nil
 }
 
-// readRows reads the matched rows of version with fix time in [from, to), in fix-time order.
+// readRows reads the matched rows of version with fix time in [from, to), in fix-time order, from
+// the archives hour.csv.gz and hour.N.csv.gz (after a restart within the hour).
 func readRows(dir string, from, to time.Time, version string) ([]row, error) {
 	var out []row
 	for h := from.Truncate(time.Hour).Add(-time.Hour); h.Before(to); h = h.Add(time.Hour) {
-		path := filepath.Join(dir, h.UTC().Format("2006-01-02T15")+".csv.gz")
-		if err := readArchive(path, from.Unix(), to.Unix(), version, &out); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s: %w", path, err)
+		name := h.UTC().Format("2006-01-02T15")
+		paths, err := filepath.Glob(filepath.Join(dir, name+".*.csv.gz"))
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range append([]string{filepath.Join(dir, name+".csv.gz")}, paths...) {
+			if err := readArchive(path, from.Unix(), to.Unix(), version, &out); err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].t < out[j].t })
@@ -272,13 +282,22 @@ func readArchive(path string, from, to int64, version string, out *[]row) error 
 	for i, h := range head {
 		col[h] = i
 	}
+	for _, c := range []string{"fix_t", "veh", "gtfs", "trip_id", "shape_id", "s_m", "delay_s"} {
+		if _, ok := col[c]; !ok {
+			return fmt.Errorf("no %s column", c)
+		}
+	}
 	for {
 		rec, err := cr.Read()
 		if err == io.EOF {
 			return nil
 		}
-		if err != nil || len(rec) != len(head) {
-			continue
+		var pe *csv.ParseError
+		if errors.As(err, &pe) || (err == nil && len(rec) != len(head)) {
+			continue // a bad row, or one cut by a crash
+		}
+		if err != nil {
+			return err
 		}
 		if rec[col["gtfs"]] != version || rec[col["trip_id"]] == "" || rec[col["shape_id"]] == "" {
 			continue

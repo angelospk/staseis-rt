@@ -919,9 +919,11 @@ with the **usual** service for the same local hour and day type, learnt from the
 - **Vehicle** `level: unknown`, `basis: null`: not matched to a Run, waiting at its first stop,
   not placed on its Pattern's shape, sparse with no `delay_s`, or fewer than 3 past days of
   today's day type are known (after a deploy on a new machine).
-- **Segment**: the road between two Stops of a Pattern, one after the other. `speed` is the
-  median speed (m/s) of the buses of **any line** that stopped at both, in that order, and
-  passed the second in the last 15 min (`n` of them); `usual_speed` is the usual speed of that
+- **Segment**: the road between two Stops one after the other on a trip of the Pattern's shape
+  (usually the Pattern's own stops; an express run of the same shape can add a pair). `speed` is
+  the median speed (m/s) of the buses of **any line** that stopped at both, in that order, over
+  the same road (stop distance within 20 %), and passed the second in the last 15 min (`n` of
+  them); `usual_speed` is the usual speed of that
   stretch of the Pattern's shape at this hour and day type (`path_speeds` data, its 200 m bins
   weighted by their travel time; `null` when under 80 % of the stretch has one). `ratio` =
   `speed` / `usual_speed`: ≥ 0.8 `normal`, 0.5 to 0.8 `worse`, under 0.5 `much_worse`;

@@ -15,6 +15,8 @@ const (
 	MaxSpeed    = 20.0             // m/s; a faster traversal is a GPS jump
 	runBackM    = 300.0            // a jump back of more than this starts a new run (usual.runBackM)
 	minRepeatS  = 600              // the same bus at the same stop again sooner is jitter (usual.minRepeatS)
+	jumpSlackM  = 100.0            // GPS slack on MaxSpeed for a fix pair; faster is a jump
+	SameRoad    = 0.2              // a traversal counts for a shape when its stop distance is this close (share)
 	firstGap    = 2                // the first stops of a shape give no gap: buses wait there
 	keepPasses  = 4                // recent passes kept per line, headsign and stop
 )
@@ -26,11 +28,12 @@ type Stop struct {
 }
 
 // Fix is one matched position of a vehicle on its trip: S metres along the shape at unix time T.
-// Stops are every stop of the shape, by Along.
+// Stops are every stop of the trip's pattern (Pattern, any key that tells the stop lists of one
+// shape apart), by Along.
 type Fix struct {
 	Vehicle, Trip  string
 	Line, Headsign string
-	Shape          string
+	Shape, Pattern string
 	Stops          []Stop
 	S              float64
 	T              int64
@@ -70,6 +73,7 @@ type passKey struct{ line, headsign, stop string }
 type traversal struct {
 	end   int64
 	speed float64
+	m     float64 // stop distance along the shape it was measured on
 }
 
 type vehicle struct {
@@ -80,39 +84,54 @@ type vehicle struct {
 	lastIdx                     int // index of the last stop passed, -1 none
 	lastT                       int64
 	gap                         *Gap
+	passed                      map[int]int64 // stop index -> pass time, this trip (repeat rule)
 }
 
 // Tracker follows the vehicles' stop passes; it is safe for concurrent use.
 type Tracker struct {
 	mu       sync.Mutex
 	vehicles map[string]*vehicle
-	passes   map[passKey][]pass        // newest last, at most keepPasses
-	segments map[[2]string][]traversal // (from, to) stop ids -> traversals, by arrival
-	shapes   map[string][]Stop         // shape -> its stops, as the last fix on it gave them
+	passes   map[passKey][]pass           // newest last, at most keepPasses
+	segments map[[2]string][]traversal    // (from, to) stop ids -> traversals, by arrival
+	shapes   map[string]map[string][]Stop // shape -> pattern -> its stops, as fixes gave them
 }
 
 func NewTracker() *Tracker {
 	return &Tracker{vehicles: map[string]*vehicle{}, passes: map[passKey][]pass{},
-		segments: map[[2]string][]traversal{}, shapes: map[string][]Stop{}}
+		segments: map[[2]string][]traversal{}, shapes: map[string]map[string][]Stop{}}
 }
 
-// Observe adds a fix. A fix of a new trip or shape, after a silence over MaxFixGapS or more than
-// runBackM back, starts the vehicle's run over; a fix that is not newer, or not past the
-// furthest point of the run, passes nothing.
+// Reset forgets everything: a new GTFS feed may reuse trip and shape ids for other geometry.
+func (k *Tracker) Reset() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.vehicles, k.passes = map[string]*vehicle{}, map[passKey][]pass{}
+	k.segments, k.shapes = map[[2]string][]traversal{}, map[string]map[string][]Stop{}
+}
+
+// Observe adds a fix. A fix that is not newer passes nothing. A fix of a new trip or shape,
+// after a silence over MaxFixGapS, more than runBackM back or faster than MaxSpeed from the last
+// one (a jump) starts the vehicle's run over; a fix not past the furthest point of the run
+// passes nothing.
 func (k *Tracker) Observe(f Fix) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.shapes[f.Shape] = f.Stops
+	if k.shapes[f.Shape] == nil {
+		k.shapes[f.Shape] = map[string][]Stop{}
+	}
+	k.shapes[f.Shape][f.Pattern] = f.Stops
 	v := k.vehicles[f.Vehicle]
-	if v == nil || v.trip != f.Trip || v.shape != f.Shape || f.T-v.t > MaxFixGapS || f.S < v.s-runBackM {
-		if v != nil && f.T <= v.t {
-			return
-		}
-		k.vehicles[f.Vehicle] = &vehicle{trip: f.Trip, line: f.Line, headsign: f.Headsign, shape: f.Shape,
-			stops: f.Stops, s: f.S, maxS: f.S, t: f.T, lastIdx: -1}
+	if v != nil && f.T <= v.t {
 		return
 	}
-	if f.T <= v.t {
+	if v == nil || v.trip != f.Trip || v.shape != f.Shape || f.T-v.t > MaxFixGapS || f.S < v.s-runBackM ||
+		f.S-v.s > MaxSpeed*float64(f.T-v.t)+jumpSlackM {
+		passed := map[int]int64{}
+		if v != nil && v.trip == f.Trip && v.shape == f.Shape {
+			passed = v.passed // the same trip again: its stops were passed already
+		}
+		k.vehicles[f.Vehicle] = &vehicle{trip: f.Trip, line: f.Line, headsign: f.Headsign, shape: f.Shape,
+			stops: f.Stops, s: f.S, maxS: f.S, t: f.T, lastIdx: -1, passed: passed}
 		return
 	}
 	prevS, prevT, maxS := v.s, v.t, v.maxS
@@ -136,14 +155,21 @@ func (k *Tracker) Observe(f Fix) {
 	}
 }
 
-// pass records that v passed its stop i at p.
+// pass records that v passed its stop i at p. A repeat (the same stop within minRepeatS, after
+// a jump back) records nothing.
 func (k *Tracker) pass(id string, v *vehicle, i int, p int64) {
 	st := v.stops[i]
+	if t0, ok := v.passed[i]; ok && p-t0 < minRepeatS && t0-p < minRepeatS {
+		v.lastIdx, v.lastT = i, p
+		return
+	}
+	v.passed[i] = p
 	if v.lastIdx == i-1 && v.lastIdx >= 0 && p > v.lastT {
 		prev := v.stops[v.lastIdx]
-		if speed := (st.Along - prev.Along) / float64(p-v.lastT); speed <= MaxSpeed {
+		m := st.Along - prev.Along
+		if speed := m / float64(p-v.lastT); speed <= MaxSpeed {
 			key := [2]string{prev.ID, st.ID}
-			k.segments[key] = append(k.segments[key], traversal{p, speed})
+			k.segments[key] = append(k.segments[key], traversal{p, speed, m})
 		}
 	}
 	v.lastIdx, v.lastT = i, p
@@ -152,11 +178,6 @@ func (k *Tracker) pass(id string, v *vehicle, i int, p int64) {
 	}
 	key := passKey{v.line, v.headsign, st.ID}
 	ps := k.passes[key]
-	for _, x := range ps {
-		if x.veh == id && p-x.t < minRepeatS && x.t-p < minRepeatS {
-			return
-		}
-	}
 	v.gap = nil
 	for j := len(ps) - 1; j >= 0; j-- {
 		if ps[j].veh != id && ps[j].t <= p {
@@ -171,6 +192,12 @@ func (k *Tracker) pass(id string, v *vehicle, i int, p int64) {
 	ps = append(ps, pass{})
 	copy(ps[j+1:], ps[j:])
 	ps[j] = pass{id, p}
+	// A pass that arrived late may sit before a bus whose gap was measured without it.
+	if j+1 < len(ps) && ps[j+1].veh != id {
+		if w := k.vehicles[ps[j+1].veh]; w != nil && w.gap != nil && w.gap.Stop == st.ID && w.gap.At == ps[j+1].t {
+			w.gap.GapS = ps[j+1].t - p
+		}
+	}
 	if len(ps) > keepPasses {
 		ps = append(ps[:0:0], ps[len(ps)-keepPasses:]...)
 	}
@@ -200,29 +227,44 @@ func (k *Tracker) State(vehicle, trip string) (VehicleState, bool) {
 	return st, true
 }
 
-// Segments lists the segments of shape (its stops as the tracker last saw them) with traversals
-// by any line that ended in (now − Window, now], in order along the shape, with their count and
+// Segments lists the segments of shape, between stops one after the other in any pattern seen on
+// it, with the traversals by any line that ended in (now − Window, now] over a stop distance
+// within SameRoad of the shape's (the same road), in order along the shape, with their count and
 // median speed.
 func (k *Tracker) Segments(shape string, now int64) []SegmentObs {
 	from := now - int64(Window.Seconds())
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	stops := k.shapes[shape]
 	var out []SegmentObs
 	var speeds []float64
-	for i := 1; i < len(stops); i++ {
-		a, b := stops[i-1], stops[i]
-		speeds = speeds[:0]
-		for _, x := range k.segments[[2]string{a.ID, b.ID}] {
-			if x.end > from && x.end <= now {
-				speeds = append(speeds, x.speed)
+	seen := map[[2]string]bool{}
+	for _, stops := range k.shapes[shape] {
+		for i := 1; i < len(stops); i++ {
+			a, b := stops[i-1], stops[i]
+			key := [2]string{a.ID, b.ID}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			m := b.Along - a.Along
+			speeds = speeds[:0]
+			for _, x := range k.segments[key] {
+				if x.end > from && x.end <= now && math.Abs(x.m-m) <= SameRoad*m {
+					speeds = append(speeds, x.speed)
+				}
+			}
+			if len(speeds) > 0 {
+				out = append(out, SegmentObs{From: a.ID, To: b.ID, FromAlong: a.Along, ToAlong: b.Along,
+					N: len(speeds), MedianMS: median(speeds)})
 			}
 		}
-		if len(speeds) > 0 {
-			out = append(out, SegmentObs{From: a.ID, To: b.ID, FromAlong: a.Along, ToAlong: b.Along,
-				N: len(speeds), MedianMS: median(speeds)})
-		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FromAlong != out[j].FromAlong {
+			return out[i].FromAlong < out[j].FromAlong
+		}
+		return out[i].ToAlong < out[j].ToAlong
+	})
 	return out
 }
 

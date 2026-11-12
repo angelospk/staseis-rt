@@ -78,8 +78,8 @@ func TestGapKeys(t *testing.T) {
 }
 
 // TestOvertaking: passes reach the tracker out of time order (a later poll of a bus that passed
-// earlier). The gap is to the latest earlier pass by another bus; a bus that passed first gets
-// no gap from a later one.
+// earlier). The gap is to the latest earlier pass by another bus, and the bus behind the late
+// pass gets its gap measured again.
 func TestOvertaking(t *testing.T) {
 	k := NewTracker()
 	k.Observe(fix("A", 900, 0))
@@ -93,8 +93,8 @@ func TestOvertaking(t *testing.T) {
 		t.Errorf("B gap = %+v, want 250 s after A", st.Gap)
 	}
 	st, _ = k.State("C", "T-C")
-	if st.Gap == nil || st.Gap.GapS != 500 {
-		t.Errorf("C keeps its gap at its own pass: %+v, want 500", st.Gap)
+	if st.Gap == nil || st.Gap.GapS != 250 {
+		t.Errorf("C's gap after B's late pass: %+v, want 250 (B is the bus ahead)", st.Gap)
 	}
 }
 
@@ -226,5 +226,77 @@ func TestSegmentsPoolLines(t *testing.T) {
 	segs = k.Segments("SH2", 400)
 	if len(segs) != 2 || segs[0].From != "S1" || segs[0].FromAlong != 300 || segs[0].N != 2 || segs[1].From != "S2" {
 		t.Errorf("SH2 = %+v", segs)
+	}
+}
+
+// TestRepeatMakesNoTraversal: a run started over by a jump back passes stops again; those
+// repeats within minRepeatS make no gap and no second traversal.
+func TestRepeatMakesNoTraversal(t *testing.T) {
+	k := NewTracker()
+	drive(k, "A", 400, 1100, 0, 10)  // S1 at 10, S2 at 60
+	drive(k, "A", 400, 1100, 80, 10) // 700 m back: a new run, S1 and S2 again
+	segs := k.Segments("SH", 200)
+	if len(segs) != 1 || segs[0].N != 1 {
+		t.Errorf("segments = %+v, want S1-S2 once", segs)
+	}
+}
+
+// TestJumpPassesNothing: a fix pair faster than MaxSpeed (plus GPS slack) is a jump; the run
+// starts over at the new fix and the stops in between are not passed.
+func TestJumpPassesNothing(t *testing.T) {
+	k := NewTracker()
+	k.Observe(fix("A", 900, 0))
+	k.Observe(fix("A", 1900, 10)) // 100 m/s over S2 and S3
+	if n := k.passCount("040", "Σύνταγμα", "S2") + k.passCount("040", "Σύνταγμα", "S3"); n != 0 {
+		t.Errorf("passes across a jump: %d", n)
+	}
+	k.Observe(fix("A", 2010, 20)) // on from the new place: S4 passed
+	if n := k.passCount("040", "Σύνταγμα", "S4"); n != 1 {
+		t.Errorf("S4 passes = %d, want 1", n)
+	}
+}
+
+// TestSegmentsEveryPattern: an express pattern of the same shape (S1, S3) does not hide the
+// local pattern's segments; a shape lists the segments of every pattern seen on it.
+func TestSegmentsEveryPattern(t *testing.T) {
+	k := NewTracker()
+	drive(k, "A", 400, 1100, 0, 10) // local: S1→S2
+	express := []Stop{stops[0], stops[1], stops[3]}
+	for t, s := int64(0), 400.0; s <= 1600; t, s = t+10, s+100 {
+		k.Observe(Fix{Vehicle: "E", Trip: "TE", Line: "040", Headsign: "Σύνταγμα", Shape: "SH", Pattern: "express",
+			Stops: express, S: s, T: t})
+	}
+	got := map[string]int{}
+	for _, s := range k.Segments("SH", 300) {
+		got[s.From+"-"+s.To] = s.N
+	}
+	if got["S1-S2"] != 1 || got["S1-S3"] != 1 || len(got) != 2 {
+		t.Errorf("segments %v, want S1-S2 and S1-S3", got)
+	}
+}
+
+// TestSegmentsSameRoadOnly: two shapes may join the same two stops by different roads. A
+// traversal counts for a shape only when its stop distance is within SameRoad of the shape's.
+func TestSegmentsSameRoadOnly(t *testing.T) {
+	k := NewTracker()
+	drive(k, "A", 400, 1100, 0, 10)                                      // SH: S1→S2 is 500 m
+	detour := []Stop{{"X0", 0}, {"S1", 300}, {"S2", 1100}, {"X3", 1500}} // 800 m between S1 and S2
+	for t, s := int64(0), 0.0; s <= 1500; t, s = t+10, s+50 {
+		k.Observe(Fix{Vehicle: "Z", Trip: "TZ", Line: "999", Headsign: "Χ", Shape: "SH2", Stops: detour, S: s, T: t})
+	}
+	for _, s := range k.Segments("SH", 400) {
+		if s.From == "S1" && s.N != 1 {
+			t.Errorf("SH S1-S2 n = %d, want 1 (the detour is another road)", s.N)
+		}
+	}
+}
+
+// TestReset: a new feed starts the tracker over.
+func TestReset(t *testing.T) {
+	k := NewTracker()
+	drive(k, "A", 0, 2000, 0, 10)
+	k.Reset()
+	if v, p, tr := k.Size(); v+p+tr != 0 || len(k.Segments("SH", 300)) != 0 {
+		t.Errorf("after Reset: %d %d %d", v, p, tr)
 	}
 }

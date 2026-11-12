@@ -47,7 +47,8 @@ func TestReplayRealHour(t *testing.T) {
 			rated += n
 		}
 	}
-	if rated == 0 || res.Segments["normal"] == 0 {
+	segs := res.Segments["normal"] + res.Segments["worse"] + res.Segments["much_worse"]
+	if rated == 0 || segs == 0 {
 		t.Errorf("no level at all: %v %v", res.Vehicles, res.Segments)
 	}
 }
