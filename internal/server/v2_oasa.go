@@ -9,6 +9,7 @@ import (
 	"github.com/angelospk/athens-transit-rt/internal/gtfs"
 	"github.com/angelospk/athens-transit-rt/internal/match"
 	"github.com/angelospk/athens-transit-rt/internal/model"
+	"github.com/angelospk/athens-transit-rt/internal/quality"
 	"github.com/angelospk/athens-transit-rt/internal/staticsite"
 	"github.com/angelospk/athens-transit-rt/internal/telematics"
 )
@@ -332,10 +333,13 @@ func routeHeadsign(w *world, line, routeCode string) string {
 
 // vehicle is a /v1 vehicle of a line poll in the /v2 shape. The direction of the run is the
 // direction of its shape (dirs), the GTFS direction_id being 0 on every OASA trip (rt#45).
-func vehicleV2(f *gtfs.Feed, dirs map[int32]int, mode, line string, r *match.Result, v *Vehicle, b boardPos) model.Vehicle {
+func vehicleV2(f *gtfs.Feed, dirs map[int32]int, mode, line string, r *match.Result, v *Vehicle, b boardPos, q *quality.VehicleLevel) model.Vehicle {
 	out := model.Vehicle{ID: oasaPrefix + v.ID, Line: oasaPrefix + line, Mode: mode, Label: model.Ptr(v.ID),
 		Position: model.Position{Kind: model.GPS, Lat: v.Lat, Lon: v.Lon, Bearing: v.Bearing, At: v.PositionAt},
 		DelayS:   v.DelayS, AtTerminus: v.AtTerminus, Source: oasaNS}
+	if q != nil {
+		out.Quality = qualityV2(*q)
+	}
 	dir := func(t *gtfs.Trip) int {
 		if d, ok := dirs[t.Shape]; ok {
 			return d
@@ -386,7 +390,7 @@ func (o *oasaAdapter) LineVehicles(id string, now time.Time) (*LineVehicles, err
 	conv := func() []model.Vehicle {
 		out := make([]model.Vehicle, len(d.vehicles))
 		for i := range d.vehicles {
-			out[i] = vehicleV2(d.feed, d.dirs, mode, line, &d.results[i], &d.vehicles[i], d.board[i])
+			out[i] = vehicleV2(d.feed, d.dirs, mode, line, &d.results[i], &d.vehicles[i], d.board[i], d.level(i))
 		}
 		return out
 	}
@@ -402,7 +406,7 @@ func (o *oasaAdapter) LineVehicles(id string, now time.Time) (*LineVehicles, err
 	case d == nil:
 		return nil, errWarming
 	}
-	return &LineVehicles{Vehicles: conv(), UpdatedAt: d.updated.Unix(), NextUpdateAt: max(next.Unix(), now.Unix()+minMaxAge),
+	return &LineVehicles{Vehicles: conv(), Segments: a.lineSegments(w, line, now), UpdatedAt: d.updated.Unix(), NextUpdateAt: max(next.Unix(), now.Unix()+minMaxAge),
 		MaxAge: int(clamp(int64(next.Sub(now)/time.Second), minMaxAge, maxMaxAge))}, nil
 }
 
@@ -432,7 +436,7 @@ func (o *oasaAdapter) Vehicles(now time.Time) ([]model.Vehicle, error) {
 			if now.Unix()-v.PositionAt > int64(vehicleMaxAge/time.Second) {
 				continue
 			}
-			mv := vehicleV2(d.feed, d.dirs, modes[id], id, &d.results[i], v, d.board[i])
+			mv := vehicleV2(d.feed, d.dirs, modes[id], id, &d.results[i], v, d.board[i], d.level(i))
 			mv.Position.Lat, mv.Position.Lon = round5(v.Lat), round5(v.Lon)
 			if j, ok := at[v.ID]; !ok {
 				at[v.ID] = len(out)

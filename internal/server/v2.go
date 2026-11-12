@@ -50,6 +50,7 @@ type LineDetail struct {
 // LineVehicles is a line's vehicles now and when they are next updated.
 type LineVehicles struct {
 	Vehicles     []model.Vehicle
+	Segments     []model.Segment // rev 23: live segment levels; nil for Sources without them
 	UpdatedAt    int64
 	NextUpdateAt int64
 	MaxAge       int
@@ -217,9 +218,12 @@ func (a *App) handleV2LineVehicles(w http.ResponseWriter, r *http.Request) {
 	if lv.Vehicles == nil {
 		lv.Vehicles = []model.Vehicle{}
 	}
+	if lv.Segments == nil {
+		lv.Segments = []model.Segment{}
+	}
 	src := a.statesOf(now, ad, []string{id})
 	writeV2(w, r, lv.MaxAge, src, map[string]any{"line": id, "updated_at": lv.UpdatedAt,
-		"next_update_at": lv.NextUpdateAt, "vehicles": lv.Vehicles, "sources": src})
+		"next_update_at": lv.NextUpdateAt, "vehicles": lv.Vehicles, "segments": lv.Segments, "sources": src})
 }
 
 // v2StopsBody is the /v2/stops body, marshalled and gzipped once (758 KB raw for ~9000 stops)

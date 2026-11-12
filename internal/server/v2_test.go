@@ -226,7 +226,8 @@ func TestV2LineVehiclesMatchV1(t *testing.T) {
 		DelayS:   old.DelayS, NextStop: model.Ptr("oasa:S3"), Direction: model.Ptr(0),
 		Motion: &model.Motion{Path: old.Path, PathBeyond: old.PathBeyond, PathStops: old.PathStops, Speed: old.Speed,
 			PathSpeeds: old.PathSpeeds},
-		Source: "oasa"}
+		Quality: &model.VehicleQuality{Level: "unknown"}, // rev 23: no usual service known in the test
+		Source:  "oasa"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("\n got %s\nwant %s", asJSON(got), asJSON(want))
 	}

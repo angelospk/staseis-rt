@@ -78,6 +78,10 @@ cities; `/` and `/{city}/debug` show the rotation state.
   [API.md](API.md#frequency-bands-frequency-citybusgr-cities) (#167). A day with no row of the city and no `frequency` gets a `.none` marker instead, so it
   is not read again. The `stats` workflow copies the days to `v1/<slug>/` on the `stats` branch,
   listed in `v1/cities.json`.
+- No live quality (contract rev 23): `/v2` Vehicles have no `quality` and
+  `/{code}/v2/lines/{id}/vehicles` no `segments`. The live levels need the time a bus passed a
+  stop to within seconds, and a row's time here is when the board was read, with a GPS lag of up
+  to 120 s that is not measured yet (#168). Turn it on only after #168 measures the lag.
 - `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
   the city's current data (a sha256 of it, saved in `static.json`). A daily reload of the same data
   keeps it, so the bot's alerts and the web's stop index (`trips-<city>.json`) stay valid.

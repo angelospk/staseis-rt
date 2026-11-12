@@ -169,7 +169,7 @@ Full field rules: [`CONTRACT.md`](CONTRACT.md#unified-api-v2-rev-8); terms:
 |---|---|---|
 | `GET /v2/lines` | every Line of every mode | 1 h |
 | `GET /v2/lines/{id}` | one Line, its Patterns (stop order + shape) and Stops | 1 h |
-| `GET /v2/lines/{id}/vehicles` | the Line's vehicles now | until `next_update_at` |
+| `GET /v2/lines/{id}/vehicles` | the Line's vehicles now, and how its stretches between stops run now (`segments`, rev 23) | until `next_update_at` |
 | `GET /v2/stops` | every Stop, compact rows `[id, name, lat, lon, modes, lines]` | 1 h |
 | `GET /v2/stops/{id}` | one Stop, its Lines and the next Arrivals (2 h, 4 per Line + headsign, 30 in all); OASA stops add OASA's own predictions for buses the backend does not have | 15 s |
 | `GET /v2/vehicles`, `/v2/vehicles/tiles/{z}/{x}/{y}` | buses and trolleys (as `/v1/vehicles` and its tiles) | until `next_update_at` |
@@ -209,6 +209,33 @@ curl -s "https://transit.haroldpoi.dev/v2/stops/$(jq -rn '"stasy:συνταγμ�
 # Every metro and tram train now, then every suburban train
 curl -s --compressed https://transit.haroldpoi.dev/v2/vehicles/rail | jq -r '.vehicles[] | [.line, .headsign, .position.kind] | @tsv'
 curl -s --compressed https://transit.haroldpoi.dev/v2/vehicles/suburban | jq -r '.vehicles[] | [.line, .label, .position.kind] | @tsv'
+```
+
+### Live quality: now against the usual (rev 23)
+
+Every bus and trolley Vehicle has `quality`, and `/v2/lines/{id}/vehicles` has `segments`: one
+scale everywhere, `normal` / `worse` / `much_worse` / `unknown` (green, yellow, red, grey), always
+against the usual service at the same hour and day type. No extra OASA request: the backend learns
+both from its own fixes. Athens and Thessaloniki; not citybus.gr (#168).
+
+- A bus on a frequent direction (usual headway at its stop ≤ 10 min) is rated by its gap to the
+  bus ahead at the last stop it passed (`basis: headway`, `gap_s`, `usual_headway_s`, `bunched`);
+  on a sparse one by `delay_s` (`basis: schedule`, `early`).
+- A segment (the road between two stops of a Pattern) is rated by the median speed of the buses
+  of any line that crossed it in the last 15 min over its usual speed (`ratio`, `speed`,
+  `usual_speed` in m/s, `n` buses). Fewer than 2 buses: `unknown`. A segment not listed is
+  `unknown`.
+
+Thresholds and wording: [`CONTRACT.md`](CONTRACT.md#live-quality-rev-23) and
+[`QUALITY.md`](QUALITY.md).
+
+```bash
+# Line 040: each bus's level and the slow stretches
+L=$(jq -rn '"oasa:040"|@uri')
+curl -s --compressed "https://transit.haroldpoi.dev/v2/lines/$L/vehicles" \
+  | jq -r '.vehicles[] | [.label, .quality.level, .quality.basis, .quality.gap_s, .delay_s] | @tsv'
+curl -s --compressed "https://transit.haroldpoi.dev/v2/lines/$L/vehicles" \
+  | jq -r '.segments[] | select(.level != "normal") | [.from, .to, .level, (.speed*3.6|floor), ((.usual_speed // 0)*3.6|floor)] | @tsv'
 ```
 
 ### Service disruptions (`/v2/alerts`)

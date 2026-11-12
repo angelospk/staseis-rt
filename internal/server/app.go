@@ -30,6 +30,7 @@ import (
 	"github.com/angelospk/athens-transit-rt/internal/meta"
 	"github.com/angelospk/athens-transit-rt/internal/municipal"
 	"github.com/angelospk/athens-transit-rt/internal/oseth"
+	"github.com/angelospk/athens-transit-rt/internal/quality"
 	"github.com/angelospk/athens-transit-rt/internal/rail"
 	"github.com/angelospk/athens-transit-rt/internal/release"
 	"github.com/angelospk/athens-transit-rt/internal/sched"
@@ -78,7 +79,10 @@ type world struct {
 	modesOnce sync.Once
 	modes     map[string]string // line -> mode (/v2), built on first use
 	dirsOnce  sync.Once
-	dirs      map[string]map[int32]int // line -> shape -> direction (0/1), built on first use
+	dirs      map[string]map[int32]int    // line -> shape -> direction (0/1), built on first use
+	qstops    map[[2]int32][]quality.Stop // (shape, pattern) -> stops along it, live quality; guarded by App.matchMu
+	patMu     sync.Mutex
+	patStops  map[string]map[string][]string // line -> shape id -> its Pattern stop ids (live segments)
 }
 
 // lineData is the last published state of one line.
@@ -87,9 +91,10 @@ type lineData struct {
 	feed     *gtfs.Feed
 	results  []match.Result
 	vehicles []Vehicle
-	board    []boardPos    // per result, for the stop boards
-	daily    []int64       // per result, its run's shift to OASA's daily schedule (dailyShifts); nil: none
-	dirs     map[int32]int // shape -> direction (0/1) on feed, kept so a feed swap does not lose it
+	board    []boardPos             // per result, for the stop boards
+	daily    []int64                // per result, its run's shift to OASA's daily schedule (dailyShifts); nil: none
+	dirs     map[int32]int          // shape -> direction (0/1) on feed, kept so a feed swap does not lose it
+	quality  []quality.VehicleLevel // per result, its live level (rev 23)
 }
 
 type App struct {
@@ -107,7 +112,8 @@ type App struct {
 
 	matchMu sync.Mutex // serialises matching (matchers are not concurrency-safe) and motion
 	motion  *motion
-	roads   *livespeed.Grid // recent speeds per road piece, from every line
+	roads   *livespeed.Grid  // recent speeds per road piece, from every line
+	live    *quality.Tracker // stop passes of the last minutes, for the live quality (rev 23)
 
 	mu           sync.RWMutex
 	w            *world
@@ -139,7 +145,8 @@ type App struct {
 	hist *history.Writer                // nil: no fix history
 	segs atomic.Pointer[segspeed.Table] // typical speeds from the history; nil until built
 	// usual holds the stop passes of past days (/v2/stops/{id} `usual`); nil without history.
-	usual atomic.Pointer[usual.Store]
+	usual     atomic.Pointer[usual.Store]
+	usualRows usualCache // the usual rows of the stops looked up this hour (live quality)
 	// histBuild runs one history build at a time (typical speeds, usual passes): each holds
 	// tens of MB while it reads.
 	histBuild sync.Mutex
@@ -194,7 +201,7 @@ type App struct {
 
 func New(cfg Config, log *slog.Logger) *App {
 	a := &App{cfg: cfg, log: log, now: time.Now, lines: map[string]*lineData{}, known: map[string]bool{},
-		roads: livespeed.New(), starts: newRunStarts()}
+		roads: livespeed.New(), live: quality.NewTracker(), starts: newRunStarts()}
 	a.motion = newMotion(a.roads)
 	a.pacer = telematics.NewPacer(cfg.RPS)
 	a.pacer.Log = log
@@ -296,6 +303,7 @@ func (a *App) SetFeed(f *gtfs.Feed, m *release.Manifest) {
 	a.w = w
 	a.mu.Unlock()
 	a.motion = newMotion(a.roads) // positions along the old feed's shapes mean nothing now
+	a.live.Reset()                // so do its stop passes: trip and shape ids may be reused for other geometry
 	// Trip ids of the old feed mean nothing either. Cleared before matchMu opens, so a poll that
 	// starts right after cannot record its matches into a map that is dropped a moment later.
 	a.forgetSeen()
@@ -452,6 +460,7 @@ func (a *App) onLine(p sched.LinePoll) {
 			vehicles[i].DelayS = ptr(results[i].Delay - int(s))
 		}
 	}
+	levels := a.liveQuality(w, results, vehicles)
 	if a.hist != nil {
 		for i := range results {
 			row := historyRow(w, p.Line, &results[i], ver)
@@ -469,7 +478,7 @@ func (a *App) onLine(p sched.LinePoll) {
 		return // keep the previous data; nothing new is known
 	}
 	a.lines[p.Line] = &lineData{updated: p.Done, feed: w.feed, results: results, vehicles: vehicles, board: board, daily: daily,
-		dirs: w.shapeDirs(p.Line)}
+		dirs: w.shapeDirs(p.Line), quality: levels}
 	a.lastPublish, a.lastOK = p.Done, p.Done
 }
 
@@ -870,6 +879,7 @@ func (a *App) housekeeping(ctx context.Context) {
 			a.warnExpiry(false)
 			a.forget()
 			a.roads.Prune(a.now().Unix())
+			a.live.Prune(a.now().Unix())
 			a.logStats()
 		case <-release.C:
 			if a.cfg.GTFSZip != "" {

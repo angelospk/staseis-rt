@@ -1,0 +1,8 @@
+[{"level": "worse", "basis": "headway", "gap_s": 780, "usual_headway_s": 540,
+  "stop": "oasa:400123", "bunched": false, "early": false},
+ {"level": "normal", "basis": "schedule", "gap_s": null, "usual_headway_s": null,
+  "stop": null, "bunched": false, "early": false},
+ {"level": "unknown", "basis": "headway", "gap_s": null, "usual_headway_s": 540,
+  "stop": null, "bunched": false, "early": false},
+ {"level": "unknown", "basis": null, "gap_s": null, "usual_headway_s": null,
+  "stop": null, "bunched": false, "early": false}]

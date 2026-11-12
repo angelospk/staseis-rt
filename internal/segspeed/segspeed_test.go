@@ -336,3 +336,39 @@ func TestMalformedInput(t *testing.T) {
 		t.Errorf("BadFiles() = %d, want 1", tab.BadFiles())
 	}
 }
+
+// TestBetween: the usual speed of a stretch is its length over the usual travel time of the
+// bins it covers (metres of each bin over its speed), from the slot's own cells only, and only
+// when at least MinCover of its metres have a speed.
+func TestBetween(t *testing.T) {
+	dir := t.TempDir()
+	writeHour(t, dir, mon0800, moving())
+	tab := build(t, dir)
+	for _, c := range []struct {
+		a, b float64
+		slot int
+		want float64
+		ok   bool
+	}{
+		{0, 400, 8, 4, true},
+		{100, 300, 8, 4, true},
+		{0, 600, 8, 600 / (50 + 50 + 200/MinBinSpeed), true}, // a standing bin counts at MinBinSpeed
+		{0, 800, 8, 0, false},                                // 600 of 800 m known: under MinCover
+		{0, 700, 8, 600 / (50 + 50 + 200/MinBinSpeed), true}, // 600 of 700 m known (0.86)
+		{0, 400, 9, 0, false},                                // no fallback to the all-hours cell
+		{400, 400, 8, 0, false},                              // empty stretch
+		{300, 100, 8, 0, false},                              // backwards
+	} {
+		got, ok := tab.Between("SH", c.a, c.b, c.slot)
+		if ok != c.ok || (ok && !near(got, c.want)) {
+			t.Errorf("Between(SH, %v, %v, %d) = %v, %v; want %v, %v", c.a, c.b, c.slot, got, ok, c.want, c.ok)
+		}
+	}
+	if _, ok := tab.Between("NONE", 0, 400, 8); ok {
+		t.Error("unknown shape")
+	}
+	var nilTab *Table
+	if _, ok := nilTab.Between("SH", 0, 400, 8); ok {
+		t.Error("nil table")
+	}
+}
