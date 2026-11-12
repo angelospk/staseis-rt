@@ -559,8 +559,9 @@ have `ref_headway_median_s` and no `median_headway_s`, `wait_min` or `off_headwa
 A pass is the time a bus run of a daily direction (same bus runs as `trips`) crosses `at` of the
 route, interpolated between two fixes at most 5 min apart; a run first seen past the point has
 no pass. Headways are the gaps between consecutive passes of the direction in the window. Only
-lines planned from OASA's daily schedule (`oasa_daily`). A bus without working telematics makes a
-long gap, so `cv_h`, `wait_min`, `ewt_min` and `off_headway_share` are upper bounds.
+lines planned from OASA's daily schedule (`oasa_daily`). A bus without working telematics has no pass,
+so two headways merge into one: `mean_headway_s`, `cv_h`, `wait_min`, `ewt_min` and
+`off_headway_share` are biased, usually up, but a missing bus can also hide a bunch and lower them.
 
 ## GTFS-Realtime details
 

@@ -2442,17 +2442,18 @@ components:
               type: array
               items:
                 type: object
-                required: [line, dir, n, mean_headway_s, median_headway_s, cv_h, wait_min, ewt_min, off_headway_share, los]
+                required: [line, dir, n, mean_headway_s, cv_h, ewt_min, los]
                 properties:
                   line: {type: string}
                   dir: {type: integer, description: "0 Go, 1 Come."}
                   n: {type: integer, description: Headways measured.}
                   mean_headway_s: {type: integer, description: Mean observed headway (the reference).}
-                  median_headway_s: {type: integer}
+                  median_headway_s: {type: integer, description: "Missing on days written before 2026-11-13."}
+                  ref_headway_median_s: {type: integer, deprecated: true, description: "Days before 2026-11-13 only: median headway, then the reference of cv_h."}
                   cv_h: {type: number, description: "Population stddev(headway) / mean_headway_s."}
-                  wait_min: {type: number, description: "Average wait, minutes: 0.5 mean (1 + cv_h^2) (TCQSM Eq. 5-1)."}
+                  wait_min: {type: number, description: "Average wait, minutes: 0.5 mean (1 + cv_h^2) (TCQSM Eq. 5-1). Missing on days written before 2026-11-13."}
                   ewt_min: {type: number, description: "Excess wait, minutes: wait_min - mean/2."}
-                  off_headway_share: {type: number, description: "Share of headways with |h - mean| > mean/2 (bunched or a gap)."}
+                  off_headway_share: {type: number, description: "Share of headways with |h - mean| > mean/2 (bunched or a gap). Missing on days written before 2026-11-13."}
                   los: {type: string, enum: [A, B, C, D, E, F], description: "TCQSM headway-adherence LOS of cv_h."}
 
     StaticLines:
