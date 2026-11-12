@@ -47,4 +47,11 @@ func TestStatsPlanUsesTheFeedInUse(t *testing.T) {
 	if err != nil || p.GTFS == "" || p.GTFS != worldVersion(a.world()) || len(p.Trips) != 6 {
 		t.Fatalf("plan = %+v, err %v", p, err)
 	}
+	if p.GTFSHeadways {
+		t.Error("Athens: GTFS headways on")
+	}
+	a.city, _ = CityByID("thessaloniki") // no daily schedule: headways from the GTFS trips (#164)
+	if p, err := a.statsPlan("2026-09-28"); err != nil || !p.GTFSHeadways {
+		t.Fatalf("Thessaloniki: plan = %+v, err %v", p, err)
+	}
 }

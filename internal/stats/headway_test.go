@@ -1,7 +1,9 @@
 package stats
 
 import (
+	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 )
@@ -114,5 +116,129 @@ func TestHeadwaysLowFrequency(t *testing.T) {
 	}
 	if h := c.headways(start, loc); h != nil {
 		t.Errorf("want nil, got %+v", h)
+	}
+}
+
+// gtfsHeadwayPlan is a GTFS plan of line L: n trips of dir 1 every gap from 08:00 (ids G0, G1,
+// ...) and n of dir 0 every 4 min (ids H0, ...), each on the stop span 1000-2000 m of its shape.
+func gtfsHeadwayPlan(loc *time.Location, n int, gap time.Duration) *Plan {
+	p := &Plan{GTFS: "v1", GTFSHeadways: true}
+	for i := 0; i < n; i++ {
+		s := time.Date(2026, 11, 2, 8, 0, 0, 0, loc).Add(time.Duration(i) * gap).Unix()
+		p.Trips = append(p.Trips, PlanTrip{ID: fmt.Sprintf("G%d", i), Line: "L", Dir: 1, Start: s, End: s + 3600, FromM: 1000, ToM: 2000})
+		s = time.Date(2026, 11, 2, 8, 0, 0, 0, loc).Add(time.Duration(i) * 4 * time.Minute).Unix()
+		p.Trips = append(p.Trips, PlanTrip{ID: fmt.Sprintf("H%d", i), Line: "L", Dir: 0, Start: s, End: s + 3600, FromM: 1000, ToM: 2000})
+	}
+	return p
+}
+
+// runGTFS adds two fixes of one bus on trip id: at 40% of its span at t0 and 60% at t0+60.
+func runGTFS(c *tripCounter, veh, id string, t0 int64) {
+	c.add(t0, veh, id, "v1", 1400)
+	c.add(t0+60, veh, id, "v1", 1600)
+}
+
+// A GTFS plan that opts in (Thessaloniki) measures each trip's mid-route pass, by line and GTFS
+// direction_id.
+func TestGTFSHeadways(t *testing.T) {
+	loc, _ := time.LoadLocation(TZ)
+	start, _, _ := Bounds("2026-11-02", loc)
+	plan := gtfsHeadwayPlan(loc, 9, 5*time.Minute)
+	c := newTripCounter(plan)
+	for _, pt := range plan.Trips {
+		runGTFS(c, "v"+pt.ID, pt.ID, pt.Start+600)
+	}
+	h := c.headways(start, loc)
+	if h == nil || len(h.ByLine) != 2 {
+		t.Fatalf("got %+v", h)
+	}
+	if l := h.ByLine[0]; l.Line != "L" || l.Dir != 0 || l.N != 8 || l.MeanS != 240 || l.CVh != 0 || l.LOS != "A" {
+		t.Errorf("dir 0: got %+v", l)
+	}
+	if l := h.ByLine[1]; l.Line != "L" || l.Dir != 1 || l.N != 8 || l.MeanS != 300 || l.WaitMin != 2.5 {
+		t.Errorf("dir 1: got %+v", l)
+	}
+
+	// Without the opt-in (Athens, citybus) the GTFS trips give no headways.
+	plan.GTFSHeadways = false
+	c = newTripCounter(plan)
+	for _, pt := range plan.Trips {
+		runGTFS(c, "v"+pt.ID, pt.ID, pt.Start+600)
+	}
+	if h := c.headways(start, loc); h != nil {
+		t.Errorf("no opt-in: want nil, got %+v", h)
+	}
+}
+
+// One pass per trip: a second bus on the same trip id (a matcher slip) adds no headway, and the
+// earlier pass counts. Fixes more than HeadwayMaxGap apart place no pass.
+func TestGTFSHeadwaysOnePassPerTrip(t *testing.T) {
+	loc, _ := time.LoadLocation(TZ)
+	start, _, _ := Bounds("2026-11-02", loc)
+	plan := gtfsHeadwayPlan(loc, 9, 5*time.Minute)
+	plan.Trips = slices.DeleteFunc(plan.Trips, func(pt PlanTrip) bool { return pt.Dir == 0 })
+	c := newTripCounter(plan)
+	for i, pt := range plan.Trips {
+		runGTFS(c, "v"+pt.ID, pt.ID, pt.Start+600)
+		if i == 3 {
+			runGTFS(c, "late", pt.ID, pt.Start+780) // the same trip again, 3 min later
+		}
+	}
+	h := c.headways(start, loc)
+	if h == nil || len(h.ByLine) != 1 {
+		t.Fatalf("got %+v", h)
+	}
+	if l := h.ByLine[0]; l.N != 8 || l.MeanS != 300 || l.CVh != 0 {
+		t.Errorf("got %+v", l)
+	}
+	// A second bus that passed earlier wins, whatever order its rows arrive in.
+	c = newTripCounter(plan)
+	pt := plan.Trips[3]
+	runGTFS(c, "v3", pt.ID, pt.Start+600)
+	runGTFS(c, "early", pt.ID, pt.Start+420)
+	if c.tripPass[3] != pt.Start+450 {
+		t.Errorf("pass %d, want the earlier %d", c.tripPass[3], pt.Start+450)
+	}
+
+	c = newTripCounter(plan)
+	for i, pt := range plan.Trips {
+		if i == 0 {
+			c.add(pt.Start+600, "v0", pt.ID, "v1", 1400)
+			c.add(pt.Start+600+int64(HeadwayMaxGap/time.Second)+1, "v0", pt.ID, "v1", 1600) // gap too long
+			continue
+		}
+		runGTFS(c, "v"+pt.ID, pt.ID, pt.Start+600)
+	}
+	if h := c.headways(start, loc); h != nil {
+		t.Errorf("8 passes, 7 headways: want nil, got %+v", h)
+	}
+}
+
+// The matcher can move a bus to another trip of its direction on the way (#131): a crossing
+// between a fix on one trip and the next on another still places a pass, on the later trip.
+func TestGTFSHeadwaysAcrossATripSwitch(t *testing.T) {
+	loc, _ := time.LoadLocation(TZ)
+	plan := gtfsHeadwayPlan(loc, 2, 5*time.Minute)
+	c := newTripCounter(plan)
+	t0 := plan.Trips[0].Start + 600
+	c.add(t0, "v", "G0", "v1", 1400)    // share 0.4 of G0
+	c.add(t0+60, "v", "G1", "v1", 1600) // share 0.6 of G1, the same direction
+	if c.tripPass[0] != 0 || c.tripPass[2] != t0+30 {
+		t.Errorf("passes %v, want only G1 (index 2) at %d", c.tripPass, t0+30)
+	}
+}
+
+// A switch to a trip with another span (a route variant) places no pass: shares of different
+// spans do not compare, so a bus standing at 1400 m must not "cross" mid-route.
+func TestGTFSHeadwaysNoPassAcrossSpans(t *testing.T) {
+	loc, _ := time.LoadLocation(TZ)
+	plan := gtfsHeadwayPlan(loc, 2, 5*time.Minute)
+	plan.Trips[2].FromM = 500 // G1: span 500-2000
+	c := newTripCounter(plan)
+	t0 := plan.Trips[0].Start + 600
+	c.add(t0, "v", "G0", "v1", 1400)    // share 0.4 of G0
+	c.add(t0+60, "v", "G1", "v1", 1400) // share 0.6 of G1: the same place
+	if c.tripPass[0] != 0 || c.tripPass[2] != 0 {
+		t.Errorf("passes %v, want none", c.tripPass)
 	}
 }

@@ -45,7 +45,8 @@ func (a *App) dailyStats(ctx context.Context) {
 }
 
 // statsPlan is the schedule of a local day from the feed in use, or from the archived daily
-// schedules when the feed has expired (DailyPlan). It builds its own matcher: the world's is not
+// schedules when the feed has expired (DailyPlan); in Thessaloniki its GTFS trips also give the
+// headways (stats.Plan.GTFSHeadways). It builds its own matcher: the world's is not
 // safe for use from this goroutine.
 func (a *App) statsPlan(date string) (*stats.Plan, error) {
 	w := a.world()
@@ -56,7 +57,11 @@ func (a *App) statsPlan(date string) (*stats.Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return DailyPlan(w.feed, worldVersion(w), date, loc, a.dailyArchiveDir())
+	p, err := DailyPlan(w.feed, worldVersion(w), date, loc, a.dailyArchiveDir())
+	if err == nil && a.city.ID == "thessaloniki" {
+		p.GTFSHeadways = true // OASTH has no daily schedule: headways from the GTFS trips (#164)
+	}
+	return p, err
 }
 
 // GET /v1/stats: the list of days with statistics.
