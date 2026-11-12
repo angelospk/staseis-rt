@@ -191,6 +191,25 @@ func (s *Store) Days() int {
 	return len(s.days)
 }
 
+// TrainingDays is the number of loaded days a Query at now learns from: the days of its day
+// type within TrainDays before its service date. 0 for a nil store.
+func (s *Store) TrainingDays(now time.Time) int {
+	if s == nil {
+		return 0
+	}
+	sd := ServiceDate(now)
+	typ := DayType(sd)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for d := range s.days {
+		if d.Before(sd) && !d.Before(sd.AddDate(0, 0, -TrainDays)) && DayType(d) == typ {
+			n++
+		}
+	}
+	return n
+}
+
 // Load (re)loads the day file of date.
 func (s *Store) Load(date time.Time) error {
 	f, err := os.Open(filepath.Join(s.dir, date.Format(dateLayout)+fileExt))

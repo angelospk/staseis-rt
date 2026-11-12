@@ -621,3 +621,21 @@ func TestBuildDayReadsOldAndNewHeaders(t *testing.T) {
 		t.Errorf("outages %v: a file format was not read", d.Outages)
 	}
 }
+
+// TestTrainingDays: the training days of a query are the loaded days of its day type within
+// TrainDays before its service date.
+func TestTrainingDays(t *testing.T) {
+	var days []*Day
+	for _, d := range append(weekdays(), date(2026, 10, 31), date(2026, 11, 5), date(2026, 10, 1)) {
+		day := NewDay(d) // 4 weekdays, a Saturday, a later weekday, a weekday too old
+		series(day, d, "08:10:00")
+		days = append(days, day)
+	}
+	if n := store(t, days...).TrainingDays(query); n != 4 {
+		t.Errorf("TrainingDays = %d, want 4", n)
+	}
+	var nilStore *Store
+	if n := nilStore.TrainingDays(query); n != 0 {
+		t.Errorf("nil store: %d", n)
+	}
+}

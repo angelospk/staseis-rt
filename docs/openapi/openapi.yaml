@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: staseis-rt
-  version: "1 (contract rev 21)"
+  version: "1 (contract rev 23)"
   summary: Live positions and GTFS-Realtime for OASA buses and trolleys in Athens.
   description: |
     Free public API, no key. Live data comes from `https://transit.haroldpoi.dev`; the static map
@@ -1245,7 +1245,9 @@ paths:
                       speed: null
                       path_speeds: null
                       knots: [[0, 1793205600], [450, 1793205660], [450, 1793205690], [1010, 1793205760]]
+                    quality: null
                     source: stasy
+                segments: []
                 sources:
                   - {id: stasy, state: ok, updated_at: 1793205600}
         "404":
@@ -3100,9 +3102,89 @@ components:
           anyOf:
             - $ref: "#/components/schemas/V2Motion"
             - type: "null"
+        quality:
+          description: |
+            Rev 23: the vehicle's live level against the usual service at this hour and day type
+            (OASA buses and trolleys in Athens and Thessaloniki). `null` where it is not measured
+            (metro, tram, suburban, citybus.gr). Older responses lack the key: treat it as `null`.
+          anyOf:
+            - $ref: "#/components/schemas/VehicleQuality"
+            - type: "null"
         source:
           type: string
           enum: [oasa, stasy, proastiakos]
+
+    QualityLevel:
+      type: string
+      enum: [normal, worse, much_worse, unknown]
+      description: |
+        Rev 23: one scale for every live level: green, yellow, red, grey. Show an unknown value
+        as `unknown`.
+
+    VehicleQuality:
+      type: object
+      description: |
+        Rev 23. Frequent direction (usual headway at the stop ≤ 10 min): `basis: headway`,
+        d = |gap_s − usual_headway_s| / usual_headway_s; d ≤ 0.25 normal, ≤ 0.5 worse, more
+        much_worse. Sparse direction: `basis: schedule`, from the vehicle's `delay_s`: −60..+300 s
+        normal, +301..+600 s or more than 60 s early worse, over +600 s much_worse.
+      required: [level, basis, gap_s, usual_headway_s, stop, bunched, early]
+      properties:
+        level:
+          $ref: "#/components/schemas/QualityLevel"
+        basis:
+          type: [string, "null"]
+          enum: [headway, schedule, null]
+          description: The measure behind `level`; `null` when there is none (`level` is `unknown`).
+        gap_s:
+          type: [integer, "null"]
+          description: Headway basis, seconds between the bus ahead and this one at `stop`; `null` before the first gap.
+        usual_headway_s:
+          type: [integer, "null"]
+          description: Headway basis, the usual headway at the stop and hour.
+        stop:
+          type: [string, "null"]
+          description: Headway basis, the Stop where `gap_s` was measured (the last one passed).
+        bunched:
+          type: boolean
+          description: "`gap_s` is under half the usual headway."
+        early:
+          type: boolean
+          description: Schedule basis, more than 60 s early.
+
+    Segment:
+      type: object
+      description: |
+        Rev 23: the live level of the road between two Stops of a Pattern, one after the other:
+        the median speed of the buses of any line that crossed it (stopping at both) in the last
+        15 min, over the usual speed of the Pattern's stretch at this hour and day type.
+        Ratio ≥ 0.8 normal, 0.5–0.8 worse, under 0.5 much_worse; unknown with fewer than 2
+        buses or no usual speed.
+      required: [pattern, from, to, level, ratio, speed, usual_speed, n]
+      properties:
+        pattern:
+          type: string
+          description: Pattern id (of `/v2/lines/{id}`).
+        from:
+          type: string
+          description: Stop id.
+        to:
+          type: string
+          description: Stop id, the next Stop of the Pattern.
+        level:
+          $ref: "#/components/schemas/QualityLevel"
+        ratio:
+          type: [number, "null"]
+          description: "`speed / usual_speed`, 2 decimals; `null` without a usual speed."
+        speed:
+          type: number
+          description: Median speed of the buses that crossed it, m/s, 1 decimal.
+        usual_speed:
+          type: [number, "null"]
+          description: Usual speed, m/s, 1 decimal; `null` when unknown.
+        n:
+          type: integer
+          description: Number of buses that crossed it in the last 15 min.
 
     LiteVehicle:
       type: object
@@ -3307,7 +3389,7 @@ components:
 
     LineVehiclesResponse:
       type: object
-      required: [line, updated_at, next_update_at, vehicles, sources]
+      required: [line, updated_at, next_update_at, vehicles, segments, sources]
       properties:
         line:
           type: string
@@ -3322,6 +3404,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Vehicle"
+        segments:
+          type: array
+          description: |
+            Rev 23: the segments of the Line's Patterns that buses crossed in the last 15 min, by
+            Pattern and in Stop order. A segment not listed is `unknown`. Always empty for metro,
+            tram and suburban Lines. Older responses lack the key: treat it as empty.
+          items:
+            $ref: "#/components/schemas/Segment"
         sources:
           type: array
           description: State of that one Source.

@@ -1,0 +1,6 @@
+[{"pattern": "oasa:2045", "from": "oasa:400012", "to": "oasa:400013", "level": "worse",
+  "ratio": 0.62, "speed": 3.3, "usual_speed": 5.3, "n": 3},
+ {"pattern": "oasa:2045", "from": "oasa:400013", "to": "oasa:400014", "level": "unknown",
+  "ratio": 1.04, "speed": 6.1, "usual_speed": 5.9, "n": 1},
+ {"pattern": "oasa:2045", "from": "oasa:400014", "to": "oasa:400015", "level": "unknown",
+  "ratio": null, "speed": 4.2, "usual_speed": null, "n": 2}]

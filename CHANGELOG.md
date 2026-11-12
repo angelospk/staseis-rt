@@ -8,6 +8,17 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
 
 ## Unreleased
 
+### Live quality (contract rev 23)
+- `/v2` bus and trolley Vehicles get `quality`: their level now against the usual service
+  (`normal | worse | much_worse | unknown`). On a frequent direction (usual headway at the stop
+  ≤ 10 min) it is the gap to the bus ahead at the last stop passed against the usual headway
+  (`gap_s`, `usual_headway_s`, `bunched`); on a sparse one the delay against the timetable
+  (`early`). `/v2/lines/{id}/vehicles` gets `segments`: the median speed of the buses of any line
+  that crossed each stop-to-stop stretch in the last 15 min against its usual speed at this hour
+  (`ratio`, `speed`, `usual_speed`, `n`). Athens and Thessaloniki, from the fixes already polled
+  (no new OASA request); citybus.gr has neither (#168). `atrt quality-replay` rates an hour of the
+  fix history the same way ([#173](https://github.com/angelospk/staseis-rt/issues/173)).
+
 ### citybus.gr cities
 - `atrt serve --city citybus --cities all|<list>`: one process serves the 28 cities of citybus.gr,
   one path per city (`/heraklion/v2/lines`), with ids namespaced per city (`heraklion:1235`). Go port

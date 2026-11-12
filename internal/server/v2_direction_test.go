@@ -115,12 +115,12 @@ func TestV2OASAVehicleDirection(t *testing.T) {
 			want = 1
 		}
 		r := match.Result{Trip: ti}
-		v := vehicleV2(f, w.shapeDirs("40"), "bus", "40", &r, &Vehicle{ID: "1"}, boardPos{})
+		v := vehicleV2(f, w.shapeDirs("40"), "bus", "40", &r, &Vehicle{ID: "1"}, boardPos{}, nil)
 		if v.Direction == nil || *v.Direction != want {
 			t.Errorf("trip %s on %s: direction %v, want %d", tr.ID, f.Shapes[tr.Shape].ID, v.Direction, want)
 		}
 		b := boardPos{trip: ti, ok: true}
-		v = vehicleV2(f, w.shapeDirs("40"), "bus", "40", &match.Result{Trip: -1}, &Vehicle{ID: "1"}, b)
+		v = vehicleV2(f, w.shapeDirs("40"), "bus", "40", &match.Result{Trip: -1}, &Vehicle{ID: "1"}, b, nil)
 		if v.Direction == nil || *v.Direction != want {
 			t.Errorf("placed on %s: direction %v, want %d", tr.ID, v.Direction, want)
 		}

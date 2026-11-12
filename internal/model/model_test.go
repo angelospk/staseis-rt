@@ -21,6 +21,8 @@ func TestFixturesRoundTrip(t *testing.T) {
 		"run.json":              func() any { return &Run{} },
 		"sources.json":          func() any { return &[]SourceState{} },
 		"usual.json":            func() any { return &[]Usual{} },
+		"vehicle-quality.json":  func() any { return &[]VehicleQuality{} },
+		"segment.json":          func() any { return &[]Segment{} },
 	}
 	for name, mk := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -52,7 +54,7 @@ func TestNullsStayKeys(t *testing.T) {
 	b, _ := json.Marshal(Vehicle{})
 	var m map[string]any
 	json.Unmarshal(b, &m)
-	for _, k := range []string{"run", "headsign", "label", "delay_s", "next_stop", "motion"} {
+	for _, k := range []string{"run", "headsign", "label", "delay_s", "next_stop", "motion", "quality"} {
 		if v, ok := m[k]; !ok || v != nil {
 			t.Errorf("%s: %v, %v", k, v, ok)
 		}

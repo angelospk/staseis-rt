@@ -4,7 +4,7 @@ The single place to learn what we measure about bus service quality, what each c
 what the user sees, and what comes next. **Keep it current.** Any change to stats, quality
 measures or their display updates this file in the same PR or commit (see "How to update").
 
-Last update: 2026-11-13.
+Last update: 2026-11-13 (live levels, #173).
 
 ## Sources
 
@@ -27,6 +27,38 @@ Last update: 2026-11-13.
 | Origin on-time (OTP) | lines with a timetable and a known scheduled departure | on time = departure 0 to +5 min late; early counts as not on time and is reported apart | `origin_otp` |
 | Start delay | Athens (OASA daily schedule) | delay of each run at its first stop: mean, p90, histogram | `start_delay` |
 | Trips run | Athens, Thessaloniki, citybus | planned trips and how many ran (coverage ≥ 0.5) | `trips` |
+| Live segment level | Athens, Thessaloniki | median speed of the buses of any line that crossed the stop-to-stop segment in the last 15 min, over the usual speed of the segment (`segspeed`, current slot only, bins weighted by travel time, ≥ 80 % of the metres known) | `/v2/lines/{id}/vehicles` `segments` |
+| Live vehicle level | Athens, Thessaloniki | frequent direction: gap to the bus ahead at the last stop passed vs the usual headway there (`usual`); sparse: `delay_s` | `/v2` Vehicle `quality` |
+
+### Live levels (contract rev 23, `internal/quality`)
+
+| Level | Segment: ratio = speed now / usual | Vehicle, frequent: d = \|gap − usual\| / usual | Vehicle, sparse: delay |
+|---|---|---|---|
+| `normal` | ≥ 0.8 | ≤ 0.25 | −60 to +300 s |
+| `worse` | 0.5 to < 0.8 | ≤ 0.5 | +301 to +600 s, or earlier than −60 s (`early`) |
+| `much_worse` | < 0.5 | > 0.5 | > +600 s |
+| `unknown` | < 2 buses in 15 min, or no usual speed | no gap yet | no `delay_s` |
+
+- Frequent = usual headway (the `usual` store's median gap in the hour) ≤ 10 min at the stop.
+  `bunched` = gap < 0.5 × usual. No vehicle level at all while fewer than 3 past days of the day
+  type are known.
+- A stop pass is the crossing of the stop's metre along the shape, interpolated between two fixes
+  at most 600 s apart; the first two stops of a Pattern give no gap (buses wait there, as in
+  `usual`). Segment traversals are pooled across lines by stop pair: per line only 9 % of the
+  segment ratings had 2 buses in 15 min; pooled, 47 % (replay below).
+- The gap changes only when a bus passes a stop: a bus stuck between two stops keeps its last level.
+
+Replay of real history (`atrt quality-replay`, Tuesday 2026-10-27, 15 training weekdays, GTFS
+2026-07-08):
+
+| Hour | Vehicle fixes: headway basis (normal / worse / much worse / unknown) | schedule basis (normal / worse / much worse) | Segment ratings every 5 min (normal / worse / much worse / unknown) |
+|---|---|---|---|
+| 08:00 | 1614 / 992 / 1348 / 1751 (bunched 340) | 10063 / 11297 / 11048 | 51675 / 4772 / 383 / 63232 |
+| 18:00 | 162 / 167 / 859 / 275 (bunched 215) | 7859 / 8519 / 11040 | 36879 / 7423 / 734 / 63727 |
+
+The schedule basis is pessimistic in this replay: those days ran on an expired GTFS, and the old
+history has no `run_start`, so the delays are against the GTFS and not against OASA's daily
+schedule as the server shows them (rev 14). Check the split again on a recent day.
 
 The reference for regularity is the **observed** headway: the scheduled one at mid-route is
 not known. So it measures evenness, not whether the promised frequency was kept. Say so when
@@ -40,7 +72,8 @@ you cite TCQSM.
 | Frequency band | not built (easy, from the plan) | not built (easy, from GTFS) | **live** (#167, PR #169, merged 2026-11-12): 27 cities |
 | Origin OTP | not built; `start_delay` has the data | not checked | **live** (PR #169): 21 cities; shown on the web line card. 2026-11-12: Patras 73.1 %, Larissa 79.0 %, Komotini 92.5 % |
 | Mid-route / terminal OTP, excess wait | planned: needs a pass at every stop | not checked | blocked by #168 (board GPS lag unmeasured) |
-| Segment delay (now vs usual) | planned; usual speed exists (`internal/segspeed`, 200 m bins × hour × day type) | not checked | not checked |
+| Segment delay (now vs usual) | **live** (#173, contract rev 23): `/v2/lines/{id}/vehicles` `segments` | **live** (#173): same code; not replayed (no history here) | not built: board time lag (#168) |
+| Vehicle level (now vs usual) | **live** (#173): `/v2` Vehicle `quality` | **live** (#173): same code | not built: board time lag (#168) |
 
 City facts that change what is possible:
 
@@ -67,6 +100,11 @@ City facts that change what is possible:
 - **Gap**: no `history-citybus-*` GitHub Release exists yet, although
   `deploy/atrt-history-release.service` exists. Without it, history older than 30 days is lost
   and past days cannot be recomputed (`atrt stats --force`).
+- Live quality (#173), measured on the replay of 2026-10-27 08:00 (48 887 fixes, 1074 buses):
+  8.5 µs per fix (the tracker, the usual lookup with its hourly cache, the level), about 0.1 ms
+  CPU per second of Athens traffic; rating every segment of every shape takes 2 ms. Memory:
+  +8.7 MB (36 678 stop passes, 38 450 traversals, the usual rows of 5748 stops). Athens runs in a
+  200 MB container (`compose.yaml`); oracle-vm (citybus) gets none of it.
 - Day files are written once after the day ends. A changed formula applies to new days only,
   unless old days are rewritten with `--force` (production; ask Harold).
 
@@ -123,8 +161,8 @@ band for this hour and where today is now.
 1. ~~Merge PR #169 (citybus frequency + origin OTP)~~ done 2026-11-12; check the Patras early share.
 2. ~~Web: line badge "χθες" on the line card from the daily stats (Athens, Thessaloniki,
    citybus)~~ done 2026-11-13 (web 1f0fd68).
-3. Backend: live "now vs usual" per segment (`segspeed` baseline) and per vehicle (gap to the bus
-   ahead on frequent lines).
+3. ~~Backend: live "now vs usual" per segment (`segspeed` baseline) and per vehicle (gap to the bus
+   ahead on frequent lines).~~ done 2026-11-13 (#173, contract rev 23).
 4. Web and app: vehicle and segment colours on the new scale; retire the delay colours.
 5. Backend: a pass at every stop → mid-route/terminal OTP, segment delay history, the 608
    inter-stop travel times for the researcher.

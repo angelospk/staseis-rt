@@ -176,7 +176,35 @@ type Vehicle struct {
 	// Direction: the direction (0/1) of the Pattern it runs, nil when unknown.
 	Direction *int    `json:"direction"`
 	Motion    *Motion `json:"motion"`
-	Source    string  `json:"source"`
+	// Quality (rev 23): the live level against the usual service; null where it is not measured.
+	Quality *VehicleQuality `json:"quality"`
+	Source  string          `json:"source"`
+}
+
+// VehicleQuality (rev 23) is a vehicle's live level on the scale of docs/QUALITY.md. Basis names
+// the measure: "headway" (gap to the bus ahead, frequent directions) or "schedule" (delay_s,
+// sparse ones); null when the level is unknown for want of a measure.
+type VehicleQuality struct {
+	Level         string  `json:"level"` // normal | worse | much_worse | unknown
+	Basis         *string `json:"basis"`
+	GapS          *int    `json:"gap_s"`
+	UsualHeadwayS *int    `json:"usual_headway_s"`
+	Stop          *string `json:"stop"`
+	Bunched       bool    `json:"bunched"`
+	Early         bool    `json:"early"`
+}
+
+// Segment (rev 23) is the live level of one stop-to-stop segment of a Pattern: the median speed
+// of the buses that crossed it lately against its usual speed at this hour and day type.
+type Segment struct {
+	Pattern    string   `json:"pattern"`
+	From       string   `json:"from"`
+	To         string   `json:"to"`
+	Level      string   `json:"level"`
+	Ratio      *float64 `json:"ratio"`
+	Speed      float64  `json:"speed"`       // m/s
+	UsualSpeed *float64 `json:"usual_speed"` // m/s
+	N          int      `json:"n"`
 }
 
 // LiteVehicle is a Vehicle without motion (vehicle tiles at zoom 9: the key is absent).

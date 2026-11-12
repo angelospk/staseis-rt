@@ -14,7 +14,10 @@ Source of truth: `athens-transit-rt/docs/CONTRACT.md`. The frontend keeps a copy
   frontend repo by whoever made it (backend thread opens the copy as a commit or
   issue on the frontend repo).
 
-Revision: 22 (2026-11-11): `/v1/stops/{stop_id}` gets `warming`, `true` while a line of the stop
+Revision: 23 (2026-11-13): `/v2` bus and trolley Vehicles get `quality`, their live level
+against the usual service, and `/v2/lines/{id}/vehicles` gets `segments`, the live level of each
+stretch between two stops ([Live quality](#live-quality-rev-23));
+rev 22 (2026-11-11): `/v1/stops/{stop_id}` gets `warming`, `true` while a line of the stop
 is polled now but has no poll yet (after a restart), so its buses are missing from `arrivals`
 ([below](#get-v1stopsstop_id-rev-8));
 rev 21: an OASA Stop (and the `stop` of `/v1/stops/{stop_id}`) gets `code`, the code on the stop sign (GTFS
@@ -606,6 +609,9 @@ and compare them; they never parse them.
   placed on, else `null`. Suburban: the direction of its Run when it has one, else of where it
   is placed on its corridor, else `null`.
   Present in tiles at zoom 9 too. Older responses lack the key: treat a missing key as `null`.
+- `quality` (rev 23): the live level of a bus or trolley against the usual service
+  ([Live quality](#live-quality-rev-23)); `null` for metro, tram and suburban. Not in tiles at
+  zoom 9. Older responses lack the key: treat a missing key as `null`.
 - `motion`: how the client moves the marker between snapshots. `null` when there is nothing to
   move along (standing with no Run, no geometry).
   - `path`, `path_beyond`, `path_stops`, `speed`, `path_speeds`: the rev 3-7 meanings, unchanged
@@ -738,7 +744,7 @@ All: UTF-8 JSON, `Access-Control-Allow-Origin: *`, gzip, times in Unix seconds, 
 |---|---|---|---|
 | `GET /v2/lines` | `{lines: [Line], sources}` all modes | 3600 | none |
 | `GET /v2/lines/{id}` | `{line: Line, patterns: [Pattern], stops: {id: Stop}, sources}` | 3600 | none |
-| `GET /v2/lines/{id}/vehicles` | `{line, updated_at, next_update_at, vehicles: [Vehicle], sources}` | until `next_update_at`, 5-300 | `oasa`: marks the line watched (as `/v1/lines/{id}`); `proastiakos`: opens the stream |
+| `GET /v2/lines/{id}/vehicles` | `{line, updated_at, next_update_at, vehicles: [Vehicle], segments: [Segment] (rev 23), sources}` | until `next_update_at`, 5-300 | `oasa`: marks the line watched (as `/v1/lines/{id}`); `proastiakos`: opens the stream |
 | `GET /v2/stops` | `{stops: [StopIndexEntry], sources}` every Stop of every mode | 3600 | none |
 | `GET /v2/stops/{id}` | `{stop: Stop, lines: [Line], arrivals: [Arrival], usual: [Usual] (rev 19), updated_at, sources}` | 15 | `oasa`: raises its lines' priority; `proastiakos`: opens the stream |
 | `GET /v2/vehicles` | `{updated_at, next_update_at, vehicles: [Vehicle], sources}` bus + trolley | until `next_update_at`, 5-30 | none |
@@ -880,6 +886,57 @@ Rules:
   carries the `updated_at` of its build. Clients keep the index and send `If-None-Match`; a `304`
   costs no body.
 
+#### Live quality (rev 23)
+
+One scale for every live level, as the line card's «Χθες» pill
+([QUALITY.md](QUALITY.md#what-the-user-sees-web-athens-transit-map-app-athens-transit-app)):
+`normal` (green), `worse` (yellow), `much_worse` (red), `unknown` (grey). It always compares
+with the **usual** service for the same local hour and day type, learnt from the fix history
+(no extra OASA request). A client shows an unknown value of `level` as `unknown`.
+
+```json
+// Vehicle.quality, frequent direction
+{"level": "worse", "basis": "headway", "gap_s": 780, "usual_headway_s": 540,
+ "stop": "oasa:400123", "bunched": false, "early": false}
+// Vehicle.quality, sparse direction (delay_s of the Vehicle)
+{"level": "normal", "basis": "schedule", "gap_s": null, "usual_headway_s": null,
+ "stop": null, "bunched": false, "early": false}
+// Segment, in /v2/lines/{id}/vehicles `segments`
+{"pattern": "oasa:2045", "from": "oasa:400012", "to": "oasa:400013", "level": "worse",
+ "ratio": 0.62, "speed": 3.3, "usual_speed": 5.3, "n": 3}
+```
+
+- **Vehicle**, frequent direction: the usual headway of its line and headsign at its stop and
+  hour (`/v2/stops/{id}` `usual`) is 10 min or less. `basis: headway`; `gap_s` is the time
+  between the bus ahead (same line and headsign) and this one at `stop`, the last stop it passed
+  (from the third stop of its Pattern on). d = |`gap_s` − `usual_headway_s`| / `usual_headway_s`:
+  d ≤ 0.25 `normal`, ≤ 0.5 `worse`, more `much_worse`. `bunched`: `gap_s` under half the usual
+  headway. Before its first gap: `level: unknown`, `gap_s` and `stop` `null`. The gap changes
+  only when the bus passes a stop.
+- **Vehicle**, sparse direction (a longer usual headway, or none): `basis: schedule`, from the
+  Vehicle's `delay_s`. −60 to +300 s `normal`; +301 to +600 s, or more than 60 s early
+  (`early: true`), `worse`; over +600 s `much_worse`.
+- **Vehicle** `level: unknown`, `basis: null`: not matched to a Run, waiting at its first stop,
+  not placed on its Pattern's shape, sparse with no `delay_s`, or fewer than 3 past days of
+  today's day type are known (after a deploy on a new machine).
+- **Segment**: the road between two Stops of a Pattern, one after the other. `speed` is the
+  median speed (m/s) of the buses of **any line** that stopped at both, in that order, and
+  passed the second in the last 15 min (`n` of them); `usual_speed` is the usual speed of that
+  stretch of the Pattern's shape at this hour and day type (`path_speeds` data, its 200 m bins
+  weighted by their travel time; `null` when under 80 % of the stretch has one). `ratio` =
+  `speed` / `usual_speed`: ≥ 0.8 `normal`, 0.5 to 0.8 `worse`, under 0.5 `much_worse`;
+  `unknown` with `n` < 2 or no usual speed. `segments` lists only segments with `n` ≥ 1, by
+  Pattern and in Stop order; **a segment not listed is `unknown`**.
+- Examples: [`fixtures/v2/vehicle-quality.json`](fixtures/v2/vehicle-quality.json),
+  [`fixtures/v2/segment.json`](fixtures/v2/segment.json).
+- Wording for passengers (Harold, 2026-11-13): vehicle «Στην ώρα του / Λίγο πίσω / Πολύ πίσω»,
+  segment «Κίνηση κανονική / Πιο αργά από συνήθως / Πολύ αργά». The numbers are there so a
+  client can explain a level («12 km/h, συνήθως 19»: `speed` × 3.6).
+- Athens and Thessaloniki only. citybus.gr cities send neither `quality` nor `segments` (treat
+  them as `null` and empty): a row there carries the time the stop board was read, not the GPS
+  time, and the lag is not measured yet (#168). Gaps and stretch times built on those times
+  would not be honest.
+
 ### 6. Mode × field availability
 
 `✓` from the Source, `≈` estimate, `—` missing (`null`), `↻` only while the suburban stream is open.
@@ -897,6 +954,7 @@ Rules:
 | Vehicle `motion.speed` | ✓ | — | ✓ (`speed_kmh` / 3.6) |
 | Vehicle `motion.path_speeds` | ✓ | — | — |
 | Vehicle `motion.knots` | — | ≈ | — |
+| Vehicle `quality` (rev 23) | ✓ | — | — |
 | Arrival `source` | `live`; `timetable` before a bus starts its Run | `timetable` | `live` ↻ or board ≤ 10 min, else `timetable` |
 | Arrival `scheduled_at` | ✓ | ✓ | ✓ |
 | Arrival `delay_s` | ✓ | — | ✓ ↻ / board (≤ 10 min old) |

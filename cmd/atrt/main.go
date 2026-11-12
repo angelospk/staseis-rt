@@ -22,10 +22,11 @@ var commands = map[string]func(args []string) error{
 	"replay":          replay,
 	"stats":           statsCmd,
 	"history-release": historyReleaseCmd,
+	"quality-replay":  qualityReplay,
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: atrt serve|snapshot|compare|record|replay|stats|history-release [flags]   (atrt <command> -h for flags)")
+	fmt.Fprintln(os.Stderr, "usage: atrt serve|snapshot|compare|record|replay|stats|history-release|quality-replay [flags]   (atrt <command> -h for flags)")
 }
 
 func main() {

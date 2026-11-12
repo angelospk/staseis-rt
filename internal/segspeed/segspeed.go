@@ -32,6 +32,7 @@ const (
 	MaxSpeed    = 20.0     // m/s; faster pairs are GPS jumps
 	SlackM      = 100.0    // m; slack on the MaxSpeed bound
 	MaxShapeM   = 500000.0 // m; longer than any bus shape, so bad values stay cheap
+	MinCover    = 0.8      // share of a stretch's metres Between needs a speed for
 
 	hourLayout = "2006-01-02T15" // history file names, UTC
 	allHours   = 72              // slot of the all-hours cell
@@ -277,6 +278,36 @@ func (t *Table) Speed(shape string, bin, slot int) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// Between returns the usual speed from a to b along shape in slot: the metres of the bins with a
+// speed in the slot's own cell (no all-hours fallback) over their usual travel time, each bin
+// counting at least MinBinSpeed. ok is false for a nil table, an unknown shape, an empty stretch
+// or when under MinCover of its metres have a speed.
+func (t *Table) Between(shape string, a, b float64, slot int) (float64, bool) {
+	if t == nil || slot < 0 || slot >= allHours || b <= a || a < 0 {
+		return 0, false
+	}
+	cells, ok := t.shapes[shape]
+	if !ok {
+		return 0, false
+	}
+	m, secs := 0.0, 0.0
+	for bin := int(math.Floor(a / BinM)); float64(bin)*BinM < b; bin++ {
+		i := bin*slots + slot
+		if i >= len(cells) {
+			break
+		}
+		ov := math.Min(b, float64(bin+1)*BinM) - math.Max(a, float64(bin)*BinM)
+		if v := cells[i]; v >= 0 && ov > 0 {
+			m += ov
+			secs += ov / math.Max(float64(v), MinBinSpeed)
+		}
+	}
+	if m < MinCover*(b-a) || secs <= 0 {
+		return 0, false
+	}
+	return m / secs, true
 }
 
 // Steps returns the speed of up to NSteps steps of StepM metres from s, each time-weighted
