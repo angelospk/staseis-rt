@@ -625,7 +625,7 @@ the service day 2026-11-12); its scheduled departure is the time in the code, so
 match is needed. A bus with a device id (a long number) has no run and does not count, even when
 the server matched it to a run. A run counts for the day of its scheduled departure. It is
 measured when the sighting before the crossing of `at_m` and the one after it are at most
-`max_gap_s` apart, and the crossing is from 10 min before to 60 min after the schedule. When the
+`max_gap_s` apart, and the sighting after the crossing is from 10 min before to 60 min after the schedule. When the
 bus crosses more than once (GPS jitter at the stand), the first crossing counts. A run first seen
 past `at_m`, or with a gap, is counted in `runs` only.
 

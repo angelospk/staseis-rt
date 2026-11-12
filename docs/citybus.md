@@ -75,7 +75,7 @@ cities; `/` and `/{city}/debug` show the rotation state.
   citybus_timetable`); a device-id bus is matched to a run about 3 times in 4, so `missed` is an
   upper bound. No `start_delay` and no `headways`; instead `frequency` (scheduled headway bands)
   and `origin_otp` (on-time performance at the origin), see
-  [API.md](API.md#frequency-bands-frequency-citybusgr-cities) (#167). A day with no row of the city and no `frequency` (no timetable that weekday) gets a `.none` marker instead, so it
+  [API.md](API.md#frequency-bands-frequency-citybusgr-cities) (#167). A day with no row of the city and no `frequency` gets a `.none` marker instead, so it
   is not read again. The `stats` workflow copies the days to `v1/<slug>/` on the `stats` branch,
   listed in `v1/cities.json`.
 - `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
