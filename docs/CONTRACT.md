@@ -346,11 +346,16 @@ the others keep their usual rate. `stop_id` is the GTFS `stop_id`, as in
 
 ```json
 { "ok": true, "gtfs_version": "2026-10-06", "gtfs_expires": "2027-01-06",
-  "updated_at": 1791100000, "lines_active": 312, "budget_rps": 4 }
+  "updated_at": 1791100000, "lines_active": 312, "budget_rps": 4,
+  "rev": "<40-hex sha>", "contract_rev": 24 }
 ```
 
 `Cache-Control: public, max-age=10`. The frontend shows a banner if `ok` is false or
 `gtfs_expires` is in the past.
+
+`rev` and `contract_rev` (rev 24) name the build: the git commit it was made from (`dev` for a
+local build without VCS info) and the contract revision it implements. The citybus
+`/{city}/v1/status` has the same fields. Clients may ignore them.
 
 ### GTFS-Realtime feeds (whole network, for journey planners)
 

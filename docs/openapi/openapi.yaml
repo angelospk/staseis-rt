@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: staseis-rt
-  version: "1 (contract rev 23)"
+  version: "1 (contract rev 24)"
   summary: Live positions and GTFS-Realtime for OASA buses and trolleys in Athens.
   description: |
     Free public API, no key. Live data comes from `https://transit.haroldpoi.dev`; the static map
@@ -438,6 +438,8 @@ paths:
                 updated_at: 1792878595
                 lines_active: 155
                 budget_rps: 5
+                rev: "242232e0a1b2c3d4e5f60718293a4b5c6d7e8f90"
+                contract_rev: 24
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -2173,7 +2175,7 @@ components:
 
     Status:
       type: object
-      required: [ok, gtfs_version, gtfs_expires, updated_at, lines_active, budget_rps]
+      required: [ok, gtfs_version, gtfs_expires, updated_at, lines_active, budget_rps, rev, contract_rev]
       properties:
         ok:
           type: boolean
@@ -2193,6 +2195,12 @@ components:
         budget_rps:
           type: number
           description: OASA requests per second the poller may use.
+        rev:
+          type: string
+          description: "Git commit the server was built from; `dev` for a local build without VCS info."
+        contract_rev:
+          type: integer
+          description: "Contract revision the server implements (rev 24)."
 
     GtfsRtFeed:
       type: object
