@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/angelospk/athens-transit-rt/internal/buildinfo"
 	"github.com/angelospk/athens-transit-rt/internal/model"
 )
 
@@ -120,5 +121,46 @@ func enumAfter(t *testing.T, doc, prefix string) []string {
 		out = append(out, strings.TrimSpace(m))
 	}
 	sort.Strings(out)
+	return out
+}
+
+// The contract revision in the code (/v1/status contract_rev) is the one the OpenAPI spec and
+// CONTRACT.md publish, and the Status schema documents the build fields (contract rev 24).
+func TestDocsMatchContractRev(t *testing.T) {
+	spec := readDoc(t, "openapi/openapi.yaml")
+	want := "version: \"1 (contract rev " + strconv.Itoa(buildinfo.ContractRev) + ")\""
+	if !strings.Contains(spec, want) {
+		t.Errorf("OpenAPI info.version is not %s", want)
+	}
+	i := strings.Index(spec, "\n    Status:\n")
+	if i < 0 {
+		t.Fatal("no Status schema in the spec")
+	}
+	required := enumAfterKey(t, spec[i:], "required: [")
+	for _, f := range []string{"rev", "contract_rev"} {
+		if !slices.Contains(required, f) {
+			t.Errorf("Status schema does not require %q: %v", f, required)
+		}
+	}
+	contract := readDoc(t, "CONTRACT.md")
+	for _, f := range []string{`"rev"`, `"contract_rev"`} {
+		if !strings.Contains(contract, f) {
+			t.Errorf("CONTRACT.md /v1/status example has no %s", f)
+		}
+	}
+}
+
+// enumAfterKey splits the first "key: [a, b]" list in doc.
+func enumAfterKey(t *testing.T, doc, key string) []string {
+	t.Helper()
+	i := strings.Index(doc, key)
+	if i < 0 {
+		t.Fatalf("no %q", key)
+	}
+	rest := doc[i+len(key):]
+	var out []string
+	for _, f := range strings.Split(rest[:strings.IndexByte(rest, ']')], ",") {
+		out = append(out, strings.TrimSpace(f))
+	}
 	return out
 }
