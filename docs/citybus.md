@@ -77,9 +77,9 @@ cities; `/` and `/{city}/debug` show the rotation state.
     printf "GITHUB_TOKEN=%s\n" "$T" | sudo install -m 600 /dev/stdin /etc/atrt/history-release.env
     sudo install -m 644 /tmp/atrt-history-release.service /tmp/atrt-history-release.timer /etc/systemd/system/
     sudo systemctl daemon-reload
-    sudo systemctl start atrt-history-release.service   # first run: every finished day now
-    sudo journalctl -u atrt-history-release --no-pager -n 20
-    sudo systemctl enable --now atrt-history-release.timer'
+    sudo systemctl enable --now atrt-history-release.timer   # first, so retries run even if the next line fails
+    sudo systemctl start atrt-history-release.service || true # first run: every finished day now
+    sudo journalctl -u atrt-history-release --no-pager -n 20'
   ```
   The token is fine-grained: Contents read and write on `angelospk/staseis-rt` only. Check:
   `gh release list -R angelospk/staseis-rt | grep history-citybus`.
