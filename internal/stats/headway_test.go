@@ -87,7 +87,7 @@ func TestTripCounterHeadways(t *testing.T) {
 		t.Fatalf("7 headways: want nil, got %+v", h)
 	}
 	h := mk(9).headways(start, loc)
-	if h == nil || len(h.ByLine) != 1 {
+	if h == nil || len(h.ByLine) != 1 || h.MaxS != 600 {
 		t.Fatalf("got %+v", h)
 	}
 	if l := h.ByLine[0]; l.N != 8 || l.MedianS != 300 || l.MeanS != 300 || l.CVh != 0 || l.EWTMin != 0 ||
@@ -240,5 +240,28 @@ func TestGTFSHeadwaysNoPassAcrossSpans(t *testing.T) {
 	c.add(t0+60, "v", "G1", "v1", 1400) // share 0.6 of G1: the same place
 	if c.tripPass[0] != 0 || c.tripPass[2] != 0 {
 		t.Errorf("passes %v, want none", c.tripPass)
+	}
+}
+
+// A GTFS plan (Thessaloniki, #181) admits directions up to 15 min and says so in MaxS; no
+// direction of 11 min or more qualifies in the daily-schedule plan (Athens, 10 min).
+func TestGTFSHeadwaysLimit15(t *testing.T) {
+	loc, _ := time.LoadLocation(TZ)
+	start, _, _ := Bounds("2026-11-02", loc)
+	run := func(gap time.Duration) *Headways {
+		plan := gtfsHeadwayPlan(loc, 9, gap)
+		c := newTripCounter(plan)
+		for _, pt := range plan.Trips {
+			runGTFS(c, "v"+pt.ID, pt.ID, pt.Start+600)
+		}
+		return c.headways(start, loc)
+	}
+	h := run(12 * time.Minute) // dir 1: 12 min, dir 0: 4 min
+	if h == nil || len(h.ByLine) != 2 || h.MaxS != 900 || h.ByLine[1].Dir != 1 || h.ByLine[1].MeanS != 720 {
+		t.Fatalf("12 min: got %+v", h)
+	}
+	h = run(16 * time.Minute) // dir 1 is over the limit, dir 0 stays
+	if h == nil || len(h.ByLine) != 1 || h.ByLine[0].Dir != 0 {
+		t.Errorf("16 min: got %+v", h)
 	}
 }

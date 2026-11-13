@@ -22,7 +22,7 @@ Last update: 2026-11-13 (live levels, #173).
 
 | Measure | Applies to | Definition | Field (daily stats) |
 |---|---|---|---|
-| Headway regularity | lines with a mean observed headway ≤ 10 min, 07:00–21:00, at mid-route | `cv_h` = population stddev / mean headway; `wait_min` = 0.5·mean·(1 + cv_h²); `ewt_min` = wait − mean/2; `off_headway_share` = share with \|h − mean\| > mean/2 | `headways` |
+| Headway regularity | lines with a mean observed headway ≤ 10 min (Thessaloniki: ≤ 15 min, `max_headway_s` 900, indicative above 10), 07:00–21:00, at mid-route | `cv_h` = population stddev / mean headway; `wait_min` = 0.5·mean·(1 + cv_h²); `ewt_min` = wait − mean/2; `off_headway_share` = share with \|h − mean\| > mean/2 | `headways` |
 | Frequency band | every line with ≥ 4 daytime departures | mean scheduled headway 07:00–21:00, bands ≤5, 5–10, 11–15, 16–30, 31–59, 60, >60 min | `frequency` |
 | Origin on-time (OTP) | lines with a timetable and a known scheduled departure | on time = departure 1 min early to 5 min late (`early_s`, `late_s`; rt#178); earlier counts as not on time and is reported apart | `origin_otp` |
 | Start delay | Athens (OASA daily schedule) | delay of each run at its first stop: mean, p90, histogram | `start_delay` |
@@ -70,7 +70,7 @@ you cite TCQSM.
 
 | Measure | Athens (OASA) | Thessaloniki (OASTH) | citybus.gr (28 cities) |
 |---|---|---|---|
-| Headway regularity | **live** (#162, PR #163, from 2026-11-13); shown on the web line card | **live** (#164, PR #166): GTFS trips, ~5 directions qualify | not built: only 2 Patras lines are ≤ 10 min (#165) |
+| Headway regularity | **live** (#162, PR #163, from 2026-11-13); shown on the web line card | **live** (#164, PR #166; limit 15 min since #181): GTFS trips, 30 directions qualify on 2026-11-12, none at 10 min | not built: only 2 Patras lines are ≤ 10 min (#165) |
 | Frequency band | not built (easy, from the plan) | not built (easy, from GTFS) | **live** (#167, PR #169, merged 2026-11-12): 27 cities |
 | Origin OTP | not built; `start_delay` has the data | not checked | **live** (PR #169): 21 cities; shown on the web line card. 2026-11-12: Patras 73.3 %, Larissa 79.8 %, Komotini 92.8 %; the early runs are real, not a bug (see below) |
 | Mid-route / terminal OTP, excess wait | planned: needs a pass at every stop | not checked | blocked by #168 (board GPS lag unmeasured) |
