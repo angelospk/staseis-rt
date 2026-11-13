@@ -111,9 +111,14 @@ type RawCity struct {
 	// same data keeps it. Files from before it was saved have neither (see version).
 	Version string `json:"version,omitempty"`
 	Hash    string `json:"hash,omitempty"`
+	// StopsVersion: the same for StopsHash (lines, stops, stop orders, shapes; no trips). It is the
+	// public gtfs_version: citybus.gr renumbers its trips and moves stop times almost every day, and
+	// the web's stop index and the bot's alerts do not depend on them (rt#179).
+	StopsVersion string `json:"stopsVersion,omitempty"`
+	StopsHash    string `json:"stopsHash,omitempty"`
 }
 
-// version is the city's gtfs_version: Version, or for an older file the day it was built.
+// version is the full version (stats plan, history rows): Version, or for an older file the day it was built.
 func (r *RawCity) version() string {
 	if r.Version != "" {
 		return r.Version
@@ -122,6 +127,14 @@ func (r *RawCity) version() string {
 		return ""
 	}
 	return athensClock(r.BuiltAt).Date
+}
+
+// stopsVersion is the city's gtfs_version: StopsVersion, or for an older file its full version.
+func (r *RawCity) stopsVersion() string {
+	if r.StopsVersion != "" {
+		return r.StopsVersion
+	}
+	return r.version()
 }
 
 // LiveRow is one bus on a stop board (stops/live/{code}).
@@ -177,12 +190,13 @@ type Line struct {
 }
 
 type Model struct {
-	Lines      []*Line
-	LineByCode map[string]*Line
-	Stops      map[string]*Stop
-	Routes     map[string]*Route
-	BuiltAt    int64
-	Version    string // gtfs_version (RawCity.version)
+	Lines        []*Line
+	LineByCode   map[string]*Line
+	Stops        map[string]*Stop
+	Routes       map[string]*Route
+	BuiltAt      int64
+	Version      string // full version: stats plan and history rows (RawCity.version)
+	StopsVersion string // gtfs_version (RawCity.stopsVersion)
 }
 
 // ---- live ----

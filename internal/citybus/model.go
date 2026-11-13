@@ -234,7 +234,7 @@ func buildModel(raw *RawCity) *Model {
 	for _, l := range lines {
 		lineByCode[l.Code] = l
 	}
-	return &Model{Lines: lines, LineByCode: lineByCode, Stops: stops, Routes: routes, BuiltAt: raw.BuiltAt, Version: raw.version()}
+	return &Model{Lines: lines, LineByCode: lineByCode, Stops: stops, Routes: routes, BuiltAt: raw.BuiltAt, Version: raw.version(), StopsVersion: raw.stopsVersion()}
 }
 
 func uniqSorted(in []string) []string {

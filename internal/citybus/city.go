@@ -302,6 +302,15 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 			raw.Version = prev.version()
 		}
 	}
+	raw.StopsHash, raw.StopsVersion = stopsHash(raw), athensClock(raw.BuiltAt).Date
+	if prevHash := prev.StopsHash; prev.stopsVersion() != "" {
+		if prevHash == "" { // a file from before the stops hash was saved
+			prevHash = stopsHash(prev)
+		}
+		if prevHash == raw.StopsHash {
+			raw.StopsVersion = prev.stopsVersion()
+		}
+	}
 	b, err = json.Marshal(raw)
 	if err != nil {
 		return err
@@ -789,13 +798,24 @@ func (c *City) freshBoard(code string) (*Board, bool) {
 // contentHash: sha256 of everything the model is built from (not BuiltAt, Version, Hash). Written
 // part by part, map keys in order, so no copy of the whole city is held in memory.
 func contentHash(raw *RawCity) string {
+	return hashOf(raw, true)
+}
+
+// stopsHash leaves out the trips: what the stop index and the alerts use (rt#179).
+func stopsHash(raw *RawCity) string {
+	return hashOf(raw, false)
+}
+
+func hashOf(raw *RawCity, trips bool) string {
 	h := sha256.New()
 	enc := json.NewEncoder(h)
 	_ = enc.Encode(raw.Lines)
 	_ = enc.Encode(raw.Stops)
 	hashMap(enc, raw.Sequences)
 	hashMap(enc, raw.Points)
-	hashMap(enc, raw.Trips)
+	if trips {
+		hashMap(enc, raw.Trips)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

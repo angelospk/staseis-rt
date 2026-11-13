@@ -1010,6 +1010,83 @@ func TestStaticVersionChangesOnlyWithTheData(t *testing.T) {
 	}
 }
 
+// citybus.gr renumbers its trips and moves stop times by a minute almost every day (rt#179). The
+// public gtfs_version follows only the lines, stops, stop orders and shapes, so the web's stop index and
+// the bot's alerts stay valid; the stats plan and the history rows keep the full version, whose trip
+// ids are the day's.
+func TestStaticVersionIgnoresTimetableChurn(t *testing.T) {
+	dir := t.TempDir()
+	raw := lineRaw()
+	f := &fake{answers: answersOf(raw)}
+	c := testCity(t, f, dir)
+	day := time.Date(2026, 11, 7, 12, 0, 0, 0, athensLoc)
+	c.now = func() time.Time { return day }
+	ctx := context.Background()
+	full := func() string {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.model.Version
+	}
+	if err := c.loadStatic(ctx, true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	day = day.Add(24 * time.Hour)
+	for i := range raw.Trips["10"] {
+		raw.Trips["10"][i].ID = 8
+		raw.Trips["10"][i].TripTime = []string{"10:00", "10:03", "10:05", "10:06"}[i]
+	}
+	f.mu.Lock()
+	f.answers = answersOf(raw)
+	f.mu.Unlock()
+	if err := c.loadStatic(ctx, true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if s, l := c.status()["gtfs_version"], c.staticLines()["gtfs_version"]; s != "2026-11-07" || l != s {
+		t.Fatalf("new trips, same stops: status %q lines %q, want 2026-11-07", s, l)
+	}
+	if v := full(); v != "2026-11-08" {
+		t.Fatalf("full version (stats, history) %q, want 2026-11-08", v)
+	}
+	// A restart keeps both.
+	c2 := testCity(t, &fake{hook: func(string) (any, bool, error) { return nil, true, nil }}, dir)
+	c2.now = func() time.Time { return day }
+	if err := c2.loadStatic(ctx, false, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	if v := c2.status()["gtfs_version"]; v != "2026-11-07" {
+		t.Fatalf("after a restart: %q", v)
+	}
+	if c2.model.Version != "2026-11-08" {
+		t.Fatalf("full version after a restart: %q", c2.model.Version)
+	}
+}
+
+// A static.json from before the stops version was saved: the first reload with the same stops takes
+// its (full) version, so the deploy does not move gtfs_version by itself.
+func TestStopsVersionFromAFileWithoutIt(t *testing.T) {
+	dir := t.TempDir()
+	raw := lineRaw()
+	raw.BuiltAt = time.Date(2026, 11, 6, 9, 0, 0, 0, athensLoc).Unix()
+	raw.Hash, raw.Version = contentHash(raw), "2026-11-05"
+	if err := os.MkdirAll(filepath.Join(dir, "t"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(raw)
+	if err := os.WriteFile(filepath.Join(dir, "t", "static.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed := lineRaw()
+	changed.Trips["10"][1].TripTime = "10:03"
+	c := testCity(t, &fake{answers: answersOf(changed)}, dir)
+	c.now = func() time.Time { return time.Date(2026, 11, 8, 9, 0, 0, 0, athensLoc) }
+	if err := c.loadStatic(context.Background(), false, priWatched); err != nil { // over 24 h: reloads
+		t.Fatal(err)
+	}
+	if v := c.status()["gtfs_version"]; v != "2026-11-05" {
+		t.Fatalf("gtfs_version %q, want 2026-11-05", v)
+	}
+}
+
 // A static.json from before the version was saved: its build day is its version, and a reload of
 // the same data keeps that day.
 func TestStaticVersionFromAnOldFile(t *testing.T) {
