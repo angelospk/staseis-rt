@@ -1,7 +1,7 @@
 # Nightly promotion: one gate for every change (backend and web)
 
-Design and plan, 2026-11-14. Status: **draft, nothing built.** Implementation starts slice by
-slice, only after Άγγελος approves this plan. Builds on PR #187 (oracle-vm deploy scripts with
+Design and plan, 2026-11-14. Status: **plan approved (D1-D5 below), nothing built yet.** Implementation goes slice by
+slice, each one its own PR. Builds on PR #187 (oracle-vm deploy scripts with
 lock, pull limit, busy-host skip) and PR #186 (`docs/research/zero-gap-deploys.md`).
 
 ## Decisions (Άγγελος, final)
@@ -347,14 +347,14 @@ slice text, the files and the verify command. Tests first.
   than the bundled tag; it writes `seen` when shown. Optional image-before/image-after in the
   body.
 
-## Decisions needed from Άγγελος
+## Decisions (Άγγελος, 2026-11-14)
 
-- **D1** Approve this plan and the slice order (1 → 9 now; 10 later).
-- **D2** Who may dispatch `hotfix`/`rollback`: repo writers (you, Alexandros), or only you?
-- **D3** Data and stats pages: lane `data` during the day (fresh data, promoted code, same gate),
-  or nightly only (stats pages up to a day older)? Recommended: lane `data`.
-- **D4** Slice 5 touches Alexandros's host: ask him, or wait until he moves Athens deploys himself?
-- **D5** No cheap model in v1 (reason above): agree?
+- **D1** Plan approved; build slices 1 → 9 in order, starting with slice 1. Slice 10 (modal)
+  later, mockup first.
+- **D2** `hotfix`/`rollback` dispatch: Άγγελος and Alexandros (repo writers).
+- **D3** Lane `data` during the day: fresh data and stats pages, promoted code, same gate.
+- **D4** Ask Alexandros now: send him the slice 5 patch for review and install.
+- **D5** No model in v1; the morning check is code only. Revisit after 2-3 weeks of real failures.
 
 ## Not verified
 
