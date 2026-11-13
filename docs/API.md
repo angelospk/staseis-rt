@@ -624,25 +624,27 @@ a JSON parser reads them back.
 ### On-time performance at the origin (`origin_otp`, citybus.gr cities)
 
 ```json
-"origin_otp": {"at_m": 100, "max_gap_s": 60, "late_s": 300,
+"origin_otp": {"at_m": 100, "max_gap_s": 60, "early_s": 60, "late_s": 300,
   "runs": 902, "measured": 728, "on_time": 532, "early": 155, "late": 41, "share": 0.731, "band": "70-79",
   "by_line": [
     {"line": "pat:601", "runs": 40, "measured": 31, "on_time": 22, "early": 6, "late": 3, "share": 0.71}
   ]}
 ```
 
-TCQSM 4th edition, Exhibit 5-8: a departure from the route origin 0 to 5 min late is on time. An
-early departure is not on time (a passenger who comes on time misses the bus), and is counted
-apart in `early`.
+TCQSM 4th edition, Exhibit 5-8: a departure from the route origin 0 to 5 min late is on time. Here
+it is 1 min early to 5 min late (since 2026-11-13, rt#178): timetables have whole minutes, and most
+early runs leave 0-60 s before the minute. A departure more than 1 min early is not on time (a
+passenger who comes on time misses the bus), and is counted apart in `early`. Day files written
+before that have no `early_s` and count any early departure as early.
 
 | Field | Meaning |
 |---|---|
 | `at_m` | the departure is the time the bus crosses this metre of the route's shape (it left the stand) |
 | `max_gap_s` | the two sightings around that crossing must be at most this far apart; the time is interpolated between them |
-| `late_s` | a departure 0 to this many seconds after the schedule is on time |
+| `early_s`, `late_s` | a departure from `early_s` s before to `late_s` s after the schedule is on time |
 | `runs` | runs of the day seen with a run code, measured or not |
 | `measured` | runs whose departure was placed (`on_time + early + late = measured`) |
-| `on_time`, `early`, `late` | measured runs that left 0 to `late_s` s after the schedule, before it, or later |
+| `on_time`, `early`, `late` | measured runs that left from `early_s` s before to `late_s` s after the schedule, earlier, or later |
 | `share` | `on_time / measured`, three decimals; missing when nothing was measured |
 | `band` | TCQSM band of `share` in whole percent, rounded down: `95-100`, `90-94`, `80-89`, `70-79`, `<70`; missing with `share` |
 | `by_line[]` | every line with a run, by id: `line` and the same counts and `share` |

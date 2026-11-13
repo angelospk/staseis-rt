@@ -106,8 +106,8 @@ func otpRow(at time.Time, line, veh string, sm int) string {
 // On-time performance at the origin: the run's scheduled departure comes from its vehicle code,
 // the actual one is the crossing of shape metre OTPAtM, interpolated between the last sighting
 // before it and the first after it when they are at most OTPMaxGap apart, and within
-// [-OTPEarlyWindow, +OTPLateWindow] of the schedule. On time is 0 to OTPLateS late; early is
-// reported apart and is not on time. A run with no such bracket counts, unjudged. Runs count for
+// [-OTPEarlyWindow, +OTPLateWindow] of the schedule. On time is OTPEarlyS early to OTPLateS late;
+// earlier is reported apart as early and is not on time. A run with no such bracket counts, unjudged. Runs count for
 // the day of their scheduled departure.
 func TestComputeOriginOTP(t *testing.T) {
 	at := func(h, m, s int) time.Time { return local(2026, 10, 6, h, m, s) }
@@ -116,13 +116,14 @@ func TestComputeOriginOTP(t *testing.T) {
 	r1 := run("r1", at(10, 0, 0))    // crosses at 10:00:00: on time (0 s)
 	r2 := run("r2", at(10, 10, 0))   // 10:15:00: on time (300 s)
 	r3 := run("r3", at(10, 20, 0))   // 10:26:00: late
-	r4 := run("r4", at(10, 30, 0))   // 10:29:10: early
+	r4 := run("r4", at(10, 30, 0))   // 10:29:00: on time (60 s early)
 	r5 := run("r5", at(10, 40, 0))   // sightings 120 s apart: unmeasured
 	r6 := run("r6", at(10, 50, 0))   // first seen mid-route: unmeasured
 	r7 := run("r7", at(11, 0, 0))    // crosses 90 min early: unmeasured
 	r8 := run("r8", at(11, 10, 0))   // no shape metre: unmeasured
 	r9 := run("r9", at(11, 20, 0))   // crosses at 11:20:10 (on time), back, and again at 11:27:10
 	r10 := run("r10", at(23, 58, 0)) // crosses at 00:01:10 the next day: on time, for the 6th
+	r11 := run("r11", at(11, 40, 0)) // 11:38:59: early (61 s)
 	prev := run("prev", local(2026, 10, 5, 23, 50, 0))
 	plan := &Plan{GTFS: "v", Source: SourceTimetable, Trips: []PlanTrip{},
 		RunDeparture: func(veh string) (int64, bool) {
@@ -139,7 +140,7 @@ func TestComputeOriginOTP(t *testing.T) {
 		otpRow(at(9, 58, 0), "c:1", r1, 0),
 		otpRow(at(10, 14, 40), "c:1", r2, 50), otpRow(at(10, 15, 20), "c:1", r2, 150),
 		otpRow(at(10, 25, 40), "c:1", r3, 50), otpRow(at(10, 26, 20), "c:1", r3, 150),
-		otpRow(at(10, 29, 0), "c:1", r4, 0), otpRow(at(10, 29, 20), "c:1", r4, 200),
+		otpRow(at(10, 28, 50), "c:1", r4, 0), otpRow(at(10, 29, 10), "c:1", r4, 200),
 		otpRow(at(10, 41, 0), "c:1", r5, 50), otpRow(at(10, 43, 0), "c:1", r5, 150),
 		otpRow(at(10, 59, 0), "c:1", r6, 800), otpRow(at(10, 59, 30), "c:1", r6, 1000),
 		otpRow(at(10, 30, 0), "c:1", "c:device", 50), otpRow(at(10, 30, 20), "c:1", "c:device", 150),
@@ -148,6 +149,7 @@ func TestComputeOriginOTP(t *testing.T) {
 		otpRow(at(11, 9, 0), "c:3", r8, -1), otpRow(at(11, 12, 0), "c:3", r8, -1),
 		otpRow(at(11, 20, 0), "c:2", r9, 50), otpRow(at(11, 20, 20), "c:2", r9, 150),
 		otpRow(at(11, 27, 0), "c:2", r9, 50), otpRow(at(11, 27, 20), "c:2", r9, 150),
+		otpRow(at(11, 38, 49), "c:1", r11, 0), otpRow(at(11, 39, 9), "c:1", r11, 200),
 	)
 	next := local(2026, 10, 7, 0, 0, 0)
 	writeRaw(t, dir, hourName(next), history.Header,
@@ -158,8 +160,8 @@ func TestComputeOriginOTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := json.Marshal(d.OriginOTP)
-	want := `{"at_m":100,"max_gap_s":60,"late_s":300,"runs":10,"measured":6,"on_time":4,"early":1,"late":1,"share":0.667,"band":"\u003c70","by_line":[` +
-		`{"line":"c:1","runs":7,"measured":4,"on_time":2,"early":1,"late":1,"share":0.5},` +
+	want := `{"at_m":100,"max_gap_s":60,"early_s":60,"late_s":300,"runs":11,"measured":7,"on_time":5,"early":1,"late":1,"share":0.714,"band":"70-79","by_line":[` +
+		`{"line":"c:1","runs":8,"measured":5,"on_time":3,"early":1,"late":1,"share":0.6},` +
 		`{"line":"c:2","runs":2,"measured":2,"on_time":2,"early":0,"late":0,"share":1},` +
 		`{"line":"c:3","runs":1,"measured":0,"on_time":0,"early":0,"late":0}]}`
 	if string(got) != want {
