@@ -1,0 +1,45 @@
+#!/bin/bash
+# Redeploy atrt-citybus (28 citybus.gr cities, rt#120) when ghcr.io/angelospk/athens-transit-rt:latest
+# has a new digest. City list: /etc/atrt-citybus.cities (one comma-separated line).
+# --history: fix history for the daily stats (rt#143, rt#151).
+# Same polling rate as the mini PC staging service: no rate flag (citybus defaults).
+# Installed as /usr/local/bin/atrt-citybus-deploy; the common part is /usr/local/lib/atrt-deploy-common.sh (#185).
+set -euo pipefail
+. /usr/local/lib/atrt-deploy-common.sh
+NAME=atrt-citybus
+CITIES=$(tr -d ' \n' < /etc/atrt-citybus.cities)
+deploy_lock
+host_check
+old=$(docker inspect --format '{{.Image}}' "$NAME" 2>/dev/null || true)
+pull
+new=$(docker image inspect --format '{{.Id}}' "$IMG")
+rev=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMG")
+if [ "$old" = "$new" ] && docker ps -q -f name="^${NAME}$" | grep -q .; then
+  echo "up to date: $NAME on rev $rev"
+  exit 0
+fi
+# Thessaloniki first: it starts in seconds; citybus follows on a later run.
+thess=$(docker inspect --format '{{.Image}}' atrt-thess 2>/dev/null || true)
+if [ -n "$thess" ] && [ "$thess" != "$new" ]; then
+  echo "skip: atrt-thess is not on rev $rev yet; it deploys first"
+  exit 0
+fi
+if [ "${DRY_RUN:-}" = 1 ]; then echo "dry run: would deploy $NAME (rev $rev)"; exit 0; fi
+echo "deploying $NAME (rev $rev)"
+[ -n "$old" ] && docker tag "$old" atrt-citybus:previous || true
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+docker run -d --name "$NAME" --restart unless-stopped --network host \
+  -e GOMEMLIMIT=330MiB --memory 400m --memory-swap 700m --read-only \
+  --security-opt no-new-privileges:true --cap-drop ALL --log-driver journald \
+  -v atrt-citybus-state:/var/lib/atrt "$IMG" \
+  serve --city citybus --cities "$CITIES" --listen 127.0.0.1:8103 --state /var/lib/atrt --history >/dev/null
+# Healthy when every city has its model, not when the server first answers (up to 10 min).
+for i in $(seq 1 120); do
+  sleep 5
+  if out=$(curl -fsS --max-time 5 127.0.0.1:8103/v1/cities) && grep -q '"ready":true' <<<"$out" && ! grep -q '"ready":false' <<<"$out"; then
+    echo "ok: rev $rev, every city ready after $((i * 5)) s"
+    exit 0
+  fi
+done
+echo "health check failed for $NAME (rev $rev): not every city ready after 600 s" >&2
+exit 1

@@ -63,7 +63,7 @@ func (c *City) sourcesLocked() []obj {
 		newest = n
 	}
 	state := "warming_up"
-	if c.model != nil {
+	if c.model != nil && c.boarded {
 		state = "ok"
 	}
 	return []obj{{"id": c.Conf.ID, "state": state, "updated_at": newest}}

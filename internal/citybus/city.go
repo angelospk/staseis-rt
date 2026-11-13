@@ -96,6 +96,7 @@ type City struct {
 	mu          sync.Mutex
 	model       *Model
 	live        *liveCity
+	boarded     bool // a stop board came in since the start: until then the live buses are unknown (#185)
 	health      *LineHealth
 	probes      []string
 	checkProbes map[string][]string // timetable-only line -> its probe stops
@@ -140,6 +141,48 @@ func (c *City) unix() int64 { return c.now().Unix() }
 
 func (c *City) base() string { return fmt.Sprintf("/el/%d", c.Conf.Agency) }
 
+// diskGate: one city at a time builds its model from static.json. All 28 cities at once at a start
+// peaked at about 400 MB of heap, over the 400 MB container; one at a time about 120 MB
+// (docs/research/zero-gap-deploys.md).
+var diskGate = make(chan struct{}, 1)
+
+// fetchGate: one city at a time reloads from citybus.gr. A reload holds the last file and the new
+// rows in memory at once.
+var fetchGate = make(chan struct{}, 1)
+
+// reloadLimit: the longest a reload from citybus.gr may hold fetchGate.
+var reloadLimit = 30 * time.Minute
+
+// loadDiskLocked installs static.json when it is readable; fresh: under 24 h old. One city at a
+// time (diskGate). The caller holds loadMu.
+func (c *City) loadDiskLocked(ctx context.Context) (fresh bool, err error) {
+	if err := acquire(ctx, diskGate); err != nil {
+		return false, err
+	}
+	defer func() { <-diskGate }()
+	b, err := os.ReadFile(filepath.Join(c.dir, "static.json"))
+	if err != nil {
+		return false, nil
+	}
+	var raw RawCity
+	if err := json.Unmarshal(b, &raw); err != nil {
+		c.log.Warn("static.json unreadable, loading again", "err", err)
+		return false, nil
+	}
+	b = nil
+	c.install(&raw)
+	return c.unix()-raw.BuiltAt < 86400, nil
+}
+
+func acquire(ctx context.Context, gate chan struct{}) error {
+	select {
+	case gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func getJSON[T any](ctx context.Context, c *City, path string, pri Priority) (*T, error) {
 	b, err := c.up.get(ctx, path, pri)
 	if err != nil || b == nil {
@@ -160,18 +203,22 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 	defer c.loadMu.Unlock()
 	file := filepath.Join(c.dir, "static.json")
 	if !force {
-		if b, err := os.ReadFile(file); err == nil {
-			var raw RawCity
-			if err := json.Unmarshal(b, &raw); err != nil {
-				c.log.Warn("static.json unreadable, loading again", "err", err)
-			} else {
-				c.install(&raw)
-				if c.unix()-raw.BuiltAt < 86400 {
-					return nil
-				}
-			}
+		fresh, err := c.loadDiskLocked(ctx)
+		if err != nil {
+			return err
+		}
+		if fresh {
+			return nil
 		}
 	}
+	if err := acquire(ctx, fetchGate); err != nil {
+		return err
+	}
+	defer func() { <-fetchGate }()
+	// The gate is shared by every city: a reload that hangs (a pacer wait is not under the HTTP
+	// timeout) must not hold it for ever. The largest city needs about 350 requests.
+	ctx, cancel := context.WithTimeout(ctx, reloadLimit)
+	defer cancel()
 	lines, err := getJSON[[]RawLine](ctx, c, c.base()+"/lines", pri)
 	if err != nil {
 		return err
@@ -380,6 +427,14 @@ func (c *City) refreshProbes() {
 	c.mu.Unlock()
 }
 
+// warm is true once the city has a model and its first stop board: before that, no vehicle list
+// can tell «no bus» from «not read yet».
+func (c *City) warm() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.model != nil && c.boarded
+}
+
 // ready is true once the city has a model.
 func (c *City) ready() bool {
 	c.mu.Lock()
@@ -409,6 +464,7 @@ func (c *City) board(ctx context.Context, stop string, pri Priority) (Board, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.boarded = true
 	if c.live != nil {
 		for _, s := range c.live.add(b) {
 			if r := c.model.Routes[s.Route]; r != nil {
@@ -477,8 +533,14 @@ func (c *City) rotate(ctx context.Context) {
 	c.mu.Lock()
 	c.svc = ctx
 	c.mu.Unlock()
-	// The first load may fail (citybus.gr down): try again, 1 min apart, until it works.
-	for ctx.Err() == nil {
+	// Any model on disk first, stale or not: the rotation starts on it at once, and the daily
+	// reload below fetches a stale one in the background (#185).
+	c.loadMu.Lock()
+	c.loadDiskLocked(ctx)
+	c.loadMu.Unlock()
+	// No model on disk: load from citybus.gr. That may fail (citybus.gr down): try again, 1 min
+	// apart, until it works.
+	for ctx.Err() == nil && !c.ready() {
 		if err := c.loadStatic(ctx, false, priWatched); err == nil {
 			break
 		} else if ctx.Err() == nil {

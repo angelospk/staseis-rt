@@ -21,6 +21,12 @@ cities; `/` and `/{city}/debug` show the rotation state.
 - `/v2` ids are namespaced per city: `her:1235` (stop), `her:01` (line),
   `her:0932` (pattern), `her:run:<trip>:<YYYY-MM-DD>` (run). The bridge used `oasa:`.
 - `/v1` keeps bare codes, as in Athens.
+- After a start, a city is `warming_up` until its model is loaded **and** its first stop board
+  (empty or not) has come in (#185): `/v1/vehicles/tiles/...` and `/v1/lines/{code}` answer
+  `503 {"error":"warming_up"}`, every `/v2` body with `sources` has the Source `warming_up` and is
+  cached 5 s (`/v2/alerts` has no `sources`; citybus has no alerts).
+  Before that board an empty vehicle list would read as «no bus running» and clear the map.
+  `/v1/cities` `ready` and `/v1/status` `ok` still mean «model loaded».
 - A stop answer (`/v1/stops/{code}`, `/v2/stops/{id}`) never waits for citybus.gr (#136). With a
   board of the stop in the cache (up to 120 s old) its rows are the live arrivals. With none, the
   live arrivals are estimates from the buses the city already tracks, marked `"estimate": true`
