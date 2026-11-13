@@ -67,6 +67,22 @@ cities; `/` and `/{city}/debug` show the rotation state.
   is skipped, so re-runs upload nothing twice. On the VPS: `deploy/atrt-history-release.{service,timer}`,
   token in `GITHUB_TOKEN` (Contents: write on this repo only). `veh` holds the citybus.gr vehicle
   code: a run slot, or for some buses the tracker's device id, both already public in `/v1/vehicles`.
+  Install on oracle-vm (once, by a person, #175). The deploy script `atrt-citybus-deploy` does not
+  install it. From the repo root:
+  ```bash
+  scp deploy/atrt-history-release.service deploy/atrt-history-release.timer oracle-vm:/tmp/
+  ssh -t oracle-vm 'set -e
+    sudo install -d -m 700 /etc/atrt
+    read -rsp "token: " T; echo
+    printf "GITHUB_TOKEN=%s\n" "$T" | sudo install -m 600 /dev/stdin /etc/atrt/history-release.env
+    sudo install -m 644 /tmp/atrt-history-release.service /tmp/atrt-history-release.timer /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl start atrt-history-release.service   # first run: every finished day now
+    sudo journalctl -u atrt-history-release --no-pager -n 20
+    sudo systemctl enable --now atrt-history-release.timer'
+  ```
+  The token is fine-grained: Contents read and write on `angelospk/staseis-rt` only. Check:
+  `gh release list -R angelospk/staseis-rt | grep history-citybus`.
 - Daily statistics (#151), with `--history` only: every hour each city sums its finished days from
   its own rows (`line` starts with its code) into `<state>/<slug>/stats`, in the format of
   [API.md](API.md#daily-statistics), served at `/{code}/v1/stats` and `/{code}/v1/stats/days/{date}`.

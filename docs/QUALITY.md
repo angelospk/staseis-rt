@@ -99,9 +99,11 @@ City facts that change what is possible:
   never load a whole day per city.
 - Disk is not a limit (174 GB free). citybus history is about 11 MB/day, kept 30 days.
   Stats JSON is 2–12 KB per city-day; the #169 blocks add 0.1–5 KB.
-- **Gap**: no `history-citybus-*` GitHub Release exists yet, although
-  `deploy/atrt-history-release.service` exists. Without it, history older than 30 days is lost
-  and past days cannot be recomputed (`atrt stats --force`).
+- **Gap** (#175): no `history-citybus-*` GitHub Release exists yet. The code works (a run on a
+  copy of the VPS history builds 2026-11-12: 11 MB, 624 378 rows), but
+  `deploy/atrt-history-release.{service,timer}` and its token were never installed on oracle-vm.
+  The history there starts 2026-11-11 09:00 UTC, so the first full day (2026-11-12) is pruned
+  about 2026-12-12. Install steps: [citybus.md](citybus.md) (History releases).
 - Live quality (#173), measured on the replay of 2026-10-27 08:00 (48 887 fixes, 1074 buses):
   14.5 µs per fix (the tracker, the usual lookup with its hourly cache, the level), about 0.15 ms
   CPU per second of Athens traffic; rating every segment of every shape takes 2.8 ms. Memory:
@@ -171,7 +173,7 @@ band for this hour and where today is now.
    inter-stop travel times for the researcher.
 6. "Today vs typical" ranges.
 
-Side work: #168 (citybus board GPS lag), the missing citybus history release.
+Side work: #168 (citybus board GPS lag), #175 (install the citybus history release on oracle-vm).
 
 ## How to update
 
