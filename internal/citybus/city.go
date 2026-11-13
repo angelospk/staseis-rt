@@ -149,6 +149,30 @@ var diskGate = make(chan struct{}, 1)
 // rows in memory at once.
 var fetchGate = make(chan struct{}, 1)
 
+// reloadLimit: the longest a reload from citybus.gr may hold fetchGate.
+var reloadLimit = 30 * time.Minute
+
+// loadDiskLocked installs static.json when it is readable; fresh: under 24 h old. One city at a
+// time (diskGate). The caller holds loadMu.
+func (c *City) loadDiskLocked(ctx context.Context) (fresh bool, err error) {
+	if err := acquire(ctx, diskGate); err != nil {
+		return false, err
+	}
+	defer func() { <-diskGate }()
+	b, err := os.ReadFile(filepath.Join(c.dir, "static.json"))
+	if err != nil {
+		return false, nil
+	}
+	var raw RawCity
+	if err := json.Unmarshal(b, &raw); err != nil {
+		c.log.Warn("static.json unreadable, loading again", "err", err)
+		return false, nil
+	}
+	b = nil
+	c.install(&raw)
+	return c.unix()-raw.BuiltAt < 86400, nil
+}
+
 func acquire(ctx context.Context, gate chan struct{}) error {
 	select {
 	case gate <- struct{}{}:
@@ -178,20 +202,10 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 	defer c.loadMu.Unlock()
 	file := filepath.Join(c.dir, "static.json")
 	if !force {
-		if err := acquire(ctx, diskGate); err != nil {
+		fresh, err := c.loadDiskLocked(ctx)
+		if err != nil {
 			return err
 		}
-		fresh := false
-		if b, err := os.ReadFile(file); err == nil {
-			var raw RawCity
-			if err := json.Unmarshal(b, &raw); err != nil {
-				c.log.Warn("static.json unreadable, loading again", "err", err)
-			} else {
-				c.install(&raw)
-				fresh = c.unix()-raw.BuiltAt < 86400
-			}
-		}
-		<-diskGate
 		if fresh {
 			return nil
 		}
@@ -200,6 +214,10 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 		return err
 	}
 	defer func() { <-fetchGate }()
+	// The gate is shared by every city: a reload that hangs (a pacer wait is not under the HTTP
+	// timeout) must not hold it for ever. The largest city needs about 350 requests.
+	ctx, cancel := context.WithTimeout(ctx, reloadLimit)
+	defer cancel()
 	lines, err := getJSON[[]RawLine](ctx, c, c.base()+"/lines", pri)
 	if err != nil {
 		return err
@@ -505,8 +523,14 @@ func (c *City) rotate(ctx context.Context) {
 	c.mu.Lock()
 	c.svc = ctx
 	c.mu.Unlock()
-	// The first load may fail (citybus.gr down): try again, 1 min apart, until it works.
-	for ctx.Err() == nil {
+	// Any model on disk first, stale or not: the rotation starts on it at once, and the daily
+	// reload below fetches a stale one in the background (#185).
+	c.loadMu.Lock()
+	c.loadDiskLocked(ctx)
+	c.loadMu.Unlock()
+	// No model on disk: load from citybus.gr. That may fail (citybus.gr down): try again, 1 min
+	// apart, until it works.
+	for ctx.Err() == nil && !c.ready() {
 		if err := c.loadStatic(ctx, false, priWatched); err == nil {
 			break
 		} else if ctx.Err() == nil {

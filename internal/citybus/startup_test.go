@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -114,5 +116,68 @@ func TestStaticLoadStopsWhileWaitingForAGate(t *testing.T) {
 	}
 	if len(diskGate) != 1 {
 		t.Fatalf("the gate holds %d slots, want only the test's own", len(diskGate))
+	}
+}
+
+// A stale city starts its rotation on the file at once; its reload from citybus.gr runs in the
+// background and does not hold up the live buses (#185).
+func TestStaleCityRotatesBeforeItsReload(t *testing.T) {
+	dir := t.TempDir()
+	var boards atomic.Int32
+	f := &fake{answers: answersOf(lineRaw()), p: newPacer(time.Millisecond)}
+	f.hook = func(path string) (any, bool, error) {
+		if strings.Contains(path, "/stops/live/") {
+			boards.Add(1)
+		}
+		return nil, false, nil
+	}
+	c := testCity(t, f, dir)
+	writeStatic(t, dir, lineRaw(), c.unix()-2*86400)
+	fetchGate <- struct{}{} // another city is reloading, for as long as this test runs
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { c.rotate(ctx); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for boards.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	<-fetchGate
+	if boards.Load() == 0 {
+		t.Fatal("a stale city must read boards while its reload waits for the fetch gate")
+	}
+}
+
+// ctxFetcher answers nothing until the request is cancelled: a reload that hangs.
+type ctxFetcher struct{ p *pacer }
+
+func (f ctxFetcher) pacer() *pacer { return f.p }
+func (f ctxFetcher) get(ctx context.Context, path string, pri Priority) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A hung reload gives the fetch gate back after reloadLimit, so the other cities can reload.
+func TestHungReloadReleasesTheFetchGate(t *testing.T) {
+	old := reloadLimit
+	reloadLimit = 50 * time.Millisecond
+	defer func() { reloadLimit = old }()
+	c, err := newCity(Conf{ID: "t", Slug: "t", Sub: "t", Agency: 1, Name: "T"}, ctxFetcher{p: newPacer(time.Second)}, t.TempDir(), quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.loadStatic(context.Background(), true, priBackground) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a hung reload must end after reloadLimit")
+	}
+	if len(fetchGate) != 0 {
+		t.Fatal("a hung reload must give the fetch gate back")
 	}
 }

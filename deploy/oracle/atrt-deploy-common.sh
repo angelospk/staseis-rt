@@ -1,6 +1,7 @@
 # Shared by atrt-thess-deploy and atrt-citybus-deploy on oracle-vm (#185). Sourced, not run.
 # One deploy at a time on the host, never on a busy host, and a time limit on the pull.
-# Env: ATRT_MIN_AVAIL_MB (250), ATRT_MAX_LOAD (4), DRY_RUN=1 (log what a deploy would do; change nothing).
+# Env: ATRT_MIN_AVAIL_MB (250), ATRT_MAX_LOAD (4), DRY_RUN=1 (log what a deploy would do; no container is touched,
+# but the pull still updates the local image).
 IMG=ghcr.io/angelospk/athens-transit-rt:latest
 LOCK=/run/lock/atrt-deploy.lock
 
