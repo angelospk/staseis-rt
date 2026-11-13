@@ -83,8 +83,11 @@ cities; `/` and `/{city}/debug` show the rotation state.
   stop to within seconds, and a row's time here is when the board was read, with a GPS lag of up
   to 120 s that is not measured yet (#168). Turn it on only after #168 measures the lag.
 - `gtfs_version` (`/v1/status`, `static/v1/lines.json`) is the Athens day of the first build with
-  the city's current data (a sha256 of it, saved in `static.json`). A daily reload of the same data
-  keeps it, so the bot's alerts and the web's stop index (`trips-<city>.json`) stay valid.
+  the city's current lines, stops, stop orders and shapes (a sha256 of them, `stopsHash` in
+  `static.json`). The trips are left out: citybus.gr renumbers them and moves stop times by a minute
+  almost every day (#179). A reload with the same stops keeps the version, so the bot's alerts and the
+  web's stop index (`trips-<city>.json`) stay valid. The stats plan and the history rows use the full
+  version, trips included (`hash`/`version` in `static.json`), since their trip ids are the day's.
 - A city's 3-letter code (`her`) is IATA where the city has its own airport, else three letters of
   the name. The slug (`heraklion`) stays for the web's `/{city}` paths and the state dir, so a code
   does not reset the state on disk.
