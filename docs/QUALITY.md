@@ -72,7 +72,7 @@ you cite TCQSM.
 |---|---|---|---|
 | Headway regularity | **live** (#162, PR #163, from 2026-11-13); shown on the web line card | **live** (#164, PR #166): GTFS trips, ~5 directions qualify | not built: only 2 Patras lines are ≤ 10 min (#165) |
 | Frequency band | not built (easy, from the plan) | not built (easy, from GTFS) | **live** (#167, PR #169, merged 2026-11-12): 27 cities |
-| Origin OTP | not built; `start_delay` has the data | not checked | **live** (PR #169): 21 cities; shown on the web line card. 2026-11-12: Patras 73.1 %, Larissa 79.0 %, Komotini 92.5 % |
+| Origin OTP | not built; `start_delay` has the data | not checked | **live** (PR #169): 21 cities; shown on the web line card. 2026-11-12: Patras 73.3 %, Larissa 79.8 %, Komotini 92.8 %; the early runs are real, not a bug (see below) |
 | Mid-route / terminal OTP, excess wait | planned: needs a pass at every stop | not checked | blocked by #168 (board GPS lag unmeasured) |
 | Segment delay (now vs usual) | **live** (#173, contract rev 23): `/v2/lines/{id}/vehicles` `segments` | **live** (#173): same code; not replayed (no history here) | not built: board time lag (#168) |
 | Vehicle level (now vs usual) | **live** (#173): `/v2` Vehicle `quality` | **live** (#173): same code | not built: board time lag (#168) |
@@ -88,9 +88,24 @@ City facts that change what is possible:
   (`…_17_20`). About 74 % of device-id buses match a run. Most lines run less often than every
   15 min (211 of 226). Drama, Kastoria, Naousa and Skiathos are timetable-only (no live buses).
   Agrinio has no timetable; Veroia has none for Wednesday to Friday.
-- **Open data check (Patras)**: 155 of 728 runs (21 %) looked early on 2026-11-12. That is
-  suspect (board lag would make buses look late, not early). Check it before OTP is shown to
-  passengers.
+- **Early departures (checked 2026-11-13, Patras day file 2026-11-12)**: 166 of 791 measured
+  runs (21 %) left early. They are real early departures in the data, not a code bug. Evidence:
+  - The day file was reproduced exactly from the history (979 runs, 791 measured, 166 early).
+  - 945 of 979 codes are a departure of their route in the Thursday timetable. A wrong time zone
+    would give ±1 h, not −21 s. No run of the day has an hour ≥ 24.
+  - The method cannot make a bus look early: board lag and the 100 m mark both make it look
+    late. No first stop of a measured run is more than 100 m along the shape. No code showed two
+    buses at once, and no position jumped near a departure.
+  - 137 of the 166 left 0–60 s early (median −21 s at metre 100, so about −40 s at the stand).
+    In 99, the bus stood at the stand ≥ 1 min first and then left before the minute
+    (`pat:…_3031_…_21_00`: stood at metre 1 until 20:59:09, at metre 116 by 20:59:42).
+  - 24 left 1–4 min early. 5 left 5–10 min early (601 at 14:00 and 20:45, 609 at 12:04 and
+    13:22): the bus drove on with the code of a later slot. They do not change the result.
+  - Patras is not special. Early share of measured runs: Ioannina 44 %, Kavala 39 %, Heraklion
+    19 %, Volos 17 %, Chios 16 %, Larissa 13 %, Komotini 3 %. Most of them are 0–60 s early.
+  - So the 0 to +5 min window (no early slack) sets the share. With −1 min slack Patras would be
+    90.6 % instead of 73.3 % (Kavala 97.5 % instead of 60.8 %). Allowing it is a product choice
+    (TCQSM mid-route uses −1 to +5); the code is unchanged.
 
 ## Resources (oracle-vm, measured 2026-11-13)
 
@@ -161,7 +176,7 @@ band for this hour and where today is now.
 
 ## Roadmap
 
-1. ~~Merge PR #169 (citybus frequency + origin OTP)~~ done 2026-11-12; check the Patras early share.
+1. ~~Merge PR #169 (citybus frequency + origin OTP)~~ done 2026-11-12; Patras early share checked 2026-11-13: real, not a bug.
 2. ~~Web: line badge "χθες" on the line card from the daily stats (Athens, Thessaloniki,
    citybus)~~ done 2026-11-13 (web 1f0fd68).
 3. ~~Backend: live "now vs usual" per segment (`segspeed` baseline) and per vehicle (gap to the bus
