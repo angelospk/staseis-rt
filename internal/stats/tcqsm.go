@@ -22,8 +22,11 @@ const (
 	OTPAtM = 100
 	// OTPMaxGap: the two sightings around the crossing must be at most this far apart.
 	OTPMaxGap = 60
-	// OTPLateS: a departure 0 to this many seconds after the schedule is on time.
-	OTPLateS = 300
+	// OTPEarlyS and OTPLateS: a departure from OTPEarlyS before to OTPLateS after the schedule is
+	// on time. Timetables have whole minutes, and in every city most early runs leave 0-60 s
+	// before the minute (Patras 2026-11-12: 137 of 166; staseis-rt#178).
+	OTPEarlyS = 60
+	OTPLateS  = 300
 	// OTPEarlyWindow and OTPLateWindow: a crossing further from the schedule is not the run's
 	// departure (a bus that drove past the stand before its run, or a code kept too long).
 	OTPEarlyWindow = 10 * 60
@@ -131,12 +134,13 @@ type LineOTP struct {
 	OTPCount
 }
 
-// OriginOTP is the on-time performance at the route origin (TCQSM Exhibit 5-8): a departure 0 to
-// LateS seconds after the schedule is on time; an early one is not. Band is the TCQSM band of
+// OriginOTP is the on-time performance at the route origin (TCQSM Exhibit 5-8): a departure from
+// EarlyS seconds before to LateS seconds after the schedule is on time; an earlier one is not. Band is the TCQSM band of
 // the share, absent when nothing was measured.
 type OriginOTP struct {
 	AtM     int `json:"at_m"`
 	MaxGapS int `json:"max_gap_s"`
+	EarlyS  int `json:"early_s"`
 	LateS   int `json:"late_s"`
 	OTPCount
 	Band   string    `json:"band,omitempty"`
@@ -237,7 +241,7 @@ func (n *OTPCount) count(d float64, ok bool) {
 	}
 	n.Measured++
 	switch {
-	case d < 0:
+	case d < -OTPEarlyS:
 		n.Early++
 	case d <= OTPLateS:
 		n.OnTime++
@@ -258,7 +262,7 @@ func (c *otpCounter) result() *OriginOTP {
 	if len(c.runs) == 0 {
 		return nil
 	}
-	out := &OriginOTP{AtM: OTPAtM, MaxGapS: OTPMaxGap, LateS: OTPLateS, ByLine: []LineOTP{}}
+	out := &OriginOTP{AtM: OTPAtM, MaxGapS: OTPMaxGap, EarlyS: OTPEarlyS, LateS: OTPLateS, ByLine: []LineOTP{}}
 	lines := map[string]*LineOTP{}
 	for _, r := range c.runs {
 		l := lines[r.line]

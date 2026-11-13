@@ -24,7 +24,7 @@ Last update: 2026-11-13 (live levels, #173).
 |---|---|---|---|
 | Headway regularity | lines with a mean observed headway ≤ 10 min, 07:00–21:00, at mid-route | `cv_h` = population stddev / mean headway; `wait_min` = 0.5·mean·(1 + cv_h²); `ewt_min` = wait − mean/2; `off_headway_share` = share with \|h − mean\| > mean/2 | `headways` |
 | Frequency band | every line with ≥ 4 daytime departures | mean scheduled headway 07:00–21:00, bands ≤5, 5–10, 11–15, 16–30, 31–59, 60, >60 min | `frequency` |
-| Origin on-time (OTP) | lines with a timetable and a known scheduled departure | on time = departure 0 to +5 min late; early counts as not on time and is reported apart | `origin_otp` |
+| Origin on-time (OTP) | lines with a timetable and a known scheduled departure | on time = departure 1 min early to 5 min late (`early_s`, `late_s`; rt#178); earlier counts as not on time and is reported apart | `origin_otp` |
 | Start delay | Athens (OASA daily schedule) | delay of each run at its first stop: mean, p90, histogram | `start_delay` |
 | Trips run | Athens, Thessaloniki, citybus | planned trips and how many ran (coverage ≥ 0.5) | `trips` |
 | Live segment level | Athens, Thessaloniki | median speed of the buses of any line that crossed the stop-to-stop segment in the last 15 min, over the usual speed of the segment (`segspeed`, current slot only, bins weighted by travel time, ≥ 80 % of the metres known) | `/v2/lines/{id}/vehicles` `segments` |
@@ -104,8 +104,9 @@ City facts that change what is possible:
   - Patras is not special. Early share of measured runs: Ioannina 44 %, Kavala 39 %, Heraklion
     19 %, Volos 17 %, Chios 16 %, Larissa 13 %, Komotini 3 %. Most of them are 0–60 s early.
   - So the 0 to +5 min window (no early slack) sets the share. With −1 min slack Patras would be
-    90.6 % instead of 73.3 % (Kavala 97.5 % instead of 60.8 %). Allowing it is a product choice
-    (TCQSM mid-route uses −1 to +5); the code is unchanged.
+    90.6 % instead of 73.3 % (Kavala 97.5 % instead of 60.8 %). Harold chose −1 min on
+    2026-11-13 (rt#178, as TCQSM mid-route): day files from 2026-11-13 on use it; older days
+    stay 0 to +5 unless rewritten with `--force`.
 
 ## Resources (oracle-vm, measured 2026-11-13)
 
@@ -145,7 +146,8 @@ and says «Προχθές» instead of «Χθες». Neither file: no pill.
 - A tap opens a panel under the pill. Sparse: the day's split at the origin (νωρίτερα / στην ώρα /
   πάνω από 5′ αργά, with counts), the on-time share of the last 7 days with a dashed 80 % line, and
   the note «Στην ώρα: 0 έως 5′ μετά το πρόγραμμα. Όποιο φεύγει νωρίτερα μετράει εκτός, γιατί όποιος
-  έρχεται στην ώρα το χάνει.» Frequent: the wait of the last 7 days with a dashed line at the
+  έρχεται στην ώρα το χάνει.» (To change: since rt#178 on time is 1′ early to 5′ late; the web
+  should read `early_s` from the day file.) Frequent: the wait of the last 7 days with a dashed line at the
   even-service wait (mean/2), and the passes and mean headway of the day. The 7 day files load
   only when the panel opens; a day without data is an empty slot.
 - Athens and Thessaloniki sparse lines: no pill (no OTP yet). Day files before 2026-11-12 have no
