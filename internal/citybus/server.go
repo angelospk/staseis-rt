@@ -279,6 +279,15 @@ func (c *City) route(w http.ResponseWriter, path string) {
 		writeErr(w, "warming_up", http.StatusServiceUnavailable)
 		return
 	}
+	// Before the first stop board the live buses are unknown: vehicle lists answer warming_up (v1)
+	// or carry the warming_up Source (v2), and nothing with that Source is cached long (#185).
+	warm := c.warm()
+	age := func(n int) int {
+		if !warm {
+			return min(n, 5)
+		}
+		return n
+	}
 	var m []string
 	match := func(re *regexp.Regexp) bool { m = re.FindStringSubmatch(path); return m != nil }
 	switch {
@@ -287,22 +296,24 @@ func (c *City) route(w http.ResponseWriter, path string) {
 	case match(reStaticLine):
 		ok(w, c.staticLine(dec(m[1])), "unknown_line", 3600)
 	case path == "/v2/lines":
-		writeJSON(w, c.v2Lines(), http.StatusOK, 3600)
+		writeJSON(w, c.v2Lines(), http.StatusOK, age(3600))
 	case path == "/v2/stops":
-		writeJSON(w, c.v2Stops(), http.StatusOK, 3600)
+		writeJSON(w, c.v2Stops(), http.StatusOK, age(3600))
 	case match(reV2LineVeh):
 		ok(w, c.v2LineVehicles(dec(m[1])), "unknown_line", 5)
 	case match(reV2Line):
-		ok(w, c.v2LineDetail(dec(m[1])), "unknown_line", 3600)
+		ok(w, c.v2LineDetail(dec(m[1])), "unknown_line", age(3600))
 	case match(reV2Stop):
-		ok(w, c.v2StopBoard(dec(m[1])), "unknown_stop", 15)
+		ok(w, c.v2StopBoard(dec(m[1])), "unknown_stop", age(15))
 	case match(reV2Run):
-		ok(w, c.v2Run(dec(m[1])), "unknown_run", 15)
+		ok(w, c.v2Run(dec(m[1])), "unknown_run", age(15))
 	case path == "/v2/alerts":
 		writeJSON(w, obj{"alerts": []any{}, "updated_at": c.unix()}, http.StatusOK, 300)
 	case match(reV1Schedule):
 		body, maxAge := c.schedule(dec(m[1]))
 		ok(w, body, "unknown_line", maxAge)
+	case !warm && (match(reV1Line) || match(reV1Tile)):
+		writeErr(w, "warming_up", http.StatusServiceUnavailable)
 	case match(reV1Line):
 		ok(w, c.v1Line(dec(m[1])), "unknown_line", 5)
 	case match(reV1Stop):

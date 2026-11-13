@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,5 +181,58 @@ func TestHungReloadReleasesTheFetchGate(t *testing.T) {
 	}
 	if len(fetchGate) != 0 {
 		t.Fatal("a hung reload must give the fetch gate back")
+	}
+}
+
+// A city with a model but no stop board yet does not know where its buses are: an empty answer
+// would read as «no bus running» (night) and clear the web's map. It answers warming_up until
+// its first board, empty or not (#185, athens-transit-map#78).
+func TestNoBoardYetIsWarmingUp(t *testing.T) {
+	a := answersOf(lineRaw())
+	a["/el/1/stops/live/D"] = liveAnswer{} // night: a board with no bus
+	c := testCity(t, &fake{answers: a}, t.TempDir())
+	if err := c.loadStatic(context.Background(), true, priWatched); err != nil {
+		t.Fatal(err)
+	}
+	s := serviceWith(t, c)
+	state := func(body map[string]any) any {
+		src, _ := body["sources"].([]any)
+		if len(src) != 1 {
+			return nil
+		}
+		return src[0].(map[string]any)["state"]
+	}
+	maxAge := func(path string) string {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec.Header().Get("Cache-Control")
+	}
+	for _, p := range []string{"/t/v1/vehicles/tiles/13/4680/3304", "/t/v1/lines/1"} {
+		if code, body := getBody(t, s, p); code != 503 || body["error"] != "warming_up" {
+			t.Fatalf("%s before the first board: %d %v", p, code, body)
+		}
+	}
+	for _, p := range []string{"/t/v2/lines/t:1/vehicles", "/t/v2/lines"} {
+		if code, body := getBody(t, s, p); code != 200 || state(body) != "warming_up" {
+			t.Fatalf("%s before the first board: %d state %v", p, code, state(body))
+		}
+	}
+	if cc := maxAge("/t/v2/lines"); cc != "public, max-age=5" {
+		t.Fatalf("a warming_up answer is cached %q, want max-age=5", cc)
+	}
+
+	if _, err := c.board(context.Background(), "D", priUser); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/t/v1/vehicles/tiles/13/4680/3304", "/t/v1/lines/1"} {
+		if code, body := getBody(t, s, p); code != 200 || body["vehicles"] == nil {
+			t.Fatalf("%s after an empty board: %d %v", p, code, body)
+		}
+	}
+	if code, body := getBody(t, s, "/t/v2/lines/t:1/vehicles"); code != 200 || state(body) != "ok" {
+		t.Fatalf("v2 vehicles after an empty board: %d state %v", code, state(body))
+	}
+	if cc := maxAge("/t/v2/lines"); cc != "public, max-age=3600" {
+		t.Fatalf("a complete /v2/lines is cached %q, want max-age=3600", cc)
 	}
 }
