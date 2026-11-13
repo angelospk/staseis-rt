@@ -8,6 +8,12 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
 
 ## Unreleased
 
+### Build in /v1/status (contract rev 24)
+- `/v1/status` and the citybus `/{city}/v1/status` get `rev` (the git commit the server was built
+  from; `dev` for a local build without VCS info) and `contract_rev` (the contract revision, 24).
+  Additive. The nightly promotion gate uses them to confirm which commit each host runs (#188)
+  ([#190](https://github.com/angelospk/staseis-rt/issues/190)).
+
 ### Live quality (contract rev 23)
 - `/v2` bus and trolley Vehicles get `quality`: their level now against the usual service
   (`normal | worse | much_worse | unknown`). On a frequent direction (usual headway at the stop

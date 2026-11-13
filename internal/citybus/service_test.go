@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/angelospk/athens-transit-rt/internal/buildinfo"
 )
 
 // Ported from citybus-bridge test/health.test.ts and test/upstream.test.ts, plus the HTTP shape.
@@ -696,6 +698,8 @@ func TestHTTPNamespacesIDsPerCity(t *testing.T) {
 	}
 	if code, st := getBody(t, s, "/heraklion/v1/status"); code != 200 || st["ok"] != true || st["lines_active"] != float64(1) {
 		t.Fatalf("status %d %v", code, st)
+	} else if st["rev"] != buildinfo.Rev() || st["contract_rev"] != float64(buildinfo.ContractRev) {
+		t.Fatalf("status names no build (contract rev 24): %v", st)
 	}
 	x, y := tileOf(35.3, 25.11, 13)
 	if _, tl := getBody(t, s, fmt.Sprintf("/heraklion/v1/vehicles/tiles/13/%d/%d", x, y)); len(tl["vehicles"].([]any)) != 1 {

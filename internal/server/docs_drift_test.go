@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/angelospk/athens-transit-rt/internal/buildinfo"
 	"github.com/angelospk/athens-transit-rt/internal/model"
 )
 
@@ -121,4 +122,35 @@ func enumAfter(t *testing.T, doc, prefix string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// The contract revision in the code (/v1/status contract_rev) is the one the OpenAPI spec and
+// CONTRACT.md publish, and the Status schema documents the build fields (contract rev 24). The
+// fields stay optional in the schema: a rolled-back rev 23 server must still pass live-check.
+func TestDocsMatchContractRev(t *testing.T) {
+	spec := readDoc(t, "openapi/openapi.yaml")
+	want := "version: \"1 (contract rev " + strconv.Itoa(buildinfo.ContractRev) + ")\""
+	if !strings.Contains(spec, want) {
+		t.Errorf("OpenAPI info.version is not %s", want)
+	}
+	i := strings.Index(spec, "\n    Status:\n")
+	if i < 0 {
+		t.Fatal("no Status schema in the spec")
+	}
+	schema := spec[i+1:]
+	schema = schema[:strings.Index(schema, "\n\n")]
+	for _, f := range []string{"rev", "contract_rev"} {
+		if !strings.Contains(schema, "\n        "+f+":\n") {
+			t.Errorf("Status schema has no property %q", f)
+		}
+	}
+	contract := readDoc(t, "CONTRACT.md")
+	if want := "\nRevision: " + strconv.Itoa(buildinfo.ContractRev) + " "; !strings.Contains(contract, want) {
+		t.Errorf("CONTRACT.md Revision line is not %q", strings.TrimSpace(want))
+	}
+	for _, f := range []string{`"rev"`, `"contract_rev"`} {
+		if !strings.Contains(contract, f) {
+			t.Errorf("CONTRACT.md /v1/status example has no %s", f)
+		}
+	}
 }
