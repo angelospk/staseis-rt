@@ -474,7 +474,7 @@ the earlier files, but `index.json` and `latest.json` skip them):
 | `by_line[]` | every line with a fix: `line`, `fixes`, `vehicles`, `dist_m`, `time_s` |
 | `trips` | scheduled trips of the day and how many ran (below); missing when the server had no static GTFS of the day's history |
 | `start_delay` | how late the runs of OASA's daily schedule left (below); missing when no run of the day was measured (every day before the field shipped) |
-| `headways` | regularity (headway adherence) of the high-frequency lines of OASA's daily schedule (below); missing when no direction qualifies (every day before the field shipped) |
+| `headways` | regularity (headway adherence) of the high-frequency lines of OASA's daily schedule (below); missing when no direction qualifies (every day before the field shipped; Thessaloniki days before 2026-11-13) |
 | `frequency` | citybus.gr cities only: scheduled frequency band of each line and direction (below); missing when no direction has 4 daytime departures |
 | `origin_otp` | citybus.gr cities only: on-time performance at the route origin (below); missing when no run of the day was seen |
 
@@ -558,7 +558,7 @@ so `runs` is a sample, not every run.
 ### Headway regularity (`headways`)
 
 ```json
-"headways": {"from_h": 7, "to_h": 21, "at": 0.5, "by_line": [
+"headways": {"from_h": 7, "to_h": 21, "at": 0.5, "max_headway_s": 600, "by_line": [
   {"line": "040", "dir": 0, "n": 96, "mean_headway_s": 512, "median_headway_s": 480, "cv_h": 0.412, "wait_min": 4.99, "ewt_min": 0.72, "off_headway_share": 0.208, "los": "D"}
 ]}
 ```
@@ -572,9 +572,10 @@ promised frequency.
 |---|---|
 | `from_h`, `to_h` | local hours of the window: passes from 07:00 to before 21:00 count |
 | `at` | the reference point: share of the route (0.5 = mid-route) a bus passes |
+| `max_headway_s` | limit on `mean_headway_s` of the listed directions: 600 (Athens) or 900 (Thessaloniki, where no direction runs at 10 min or less). Above 600 the TCQSM bands are only indicative: some riders follow the timetable instead of arriving at random |
 | `by_line[]` | one entry per direction of a line, by line then `dir`. Athens: `dir` 0 Go, 1 Come of OASA's daily schedule. Thessaloniki: `dir` is the GTFS `direction_id` |
 | `n` | headways measured (at least 8) |
-| `mean_headway_s` | mean observed headway (at most 600 s: only directions at 10 min or less are listed, as in TCQSM Exhibit 5-9) |
+| `mean_headway_s` | mean observed headway (at most `max_headway_s`; 600 s is the 10 min of TCQSM Exhibit 5-9) |
 | `median_headway_s` | median observed headway |
 | `cv_h` | headway adherence: population stddev of the headways / `mean_headway_s` |
 | `wait_min` | average wait in minutes of a passenger who arrives at random: 0.5 · mean · (1 + cv_h²) (TCQSM Eq. 5-1) |

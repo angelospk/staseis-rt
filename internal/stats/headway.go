@@ -17,15 +17,22 @@ const (
 	// HeadwayMaxRef: only directions whose mean observed headway is at most this count
 	// (high-frequency lines; TCQSM 4th ed. Exhibit 5-9 applies to headways of 10 min or less).
 	HeadwayMaxRef = 10 * time.Minute
+	// HeadwayMaxRefGTFS: the limit of a plan that measures GTFS trips (Thessaloniki, #181). No
+	// direction there has a mean headway of 10 min or less, so the block would never appear.
+	// Above 10 min riders partly follow the timetable, so the block says which limit it used.
+	HeadwayMaxRefGTFS = 15 * time.Minute
 	// HeadwayMinN: a direction with fewer headways is left out.
 	HeadwayMinN = 8
 )
 
 // Headways is the regularity of the day's high-frequency lines (headway adherence, TCQSM).
 type Headways struct {
-	FromH  int           `json:"from_h"`
-	ToH    int           `json:"to_h"`
-	At     float64       `json:"at"` // share of the route where passes are taken
+	FromH int     `json:"from_h"`
+	ToH   int     `json:"to_h"`
+	At    float64 `json:"at"` // share of the route where passes are taken
+	// MaxS is the limit on the mean headway of the listed directions (HeadwayMaxRef, or
+	// HeadwayMaxRefGTFS); the TCQSM bands are meant for 600 s or less.
+	MaxS   int64         `json:"max_headway_s"`
 	ByLine []LineHeadway `json:"by_line"`
 }
 
@@ -104,7 +111,7 @@ func LOS(cv float64) string {
 
 // headways sums the passes of the daily directions, and with GTFSHeadways of the GTFS trips by
 // line and direction_id: those in [HeadwayFromH, HeadwayToH) of the local day starting at start.
-// nil when no direction qualifies.
+// nil when no direction qualifies (mean headway over HeadwayMaxRef; HeadwayMaxRefGTFS with GTFSHeadways).
 func (c *tripCounter) headways(start time.Time, loc *time.Location) *Headways {
 	from := time.Date(start.Year(), start.Month(), start.Day(), HeadwayFromH, 0, 0, 0, loc).Unix()
 	to := time.Date(start.Year(), start.Month(), start.Day(), HeadwayToH, 0, 0, 0, loc).Unix()
@@ -126,7 +133,11 @@ func (c *tripCounter) headways(start time.Time, loc *time.Location) *Headways {
 		pt := c.plan.Trips[k]
 		keep(dirKey{pt.Line, pt.Dir}, p)
 	}
-	out := &Headways{FromH: HeadwayFromH, ToH: HeadwayToH, At: HeadwayAt, ByLine: []LineHeadway{}}
+	maxRef := HeadwayMaxRef
+	if c.plan.GTFSHeadways {
+		maxRef = HeadwayMaxRefGTFS
+	}
+	out := &Headways{FromH: HeadwayFromH, ToH: HeadwayToH, At: HeadwayAt, MaxS: int64(maxRef.Seconds()), ByLine: []LineHeadway{}}
 	for k, ps := range passes {
 		sort.Slice(ps, func(a, b int) bool { return ps[a] < ps[b] })
 		hs := make([]float64, 0, len(ps))
@@ -134,7 +145,7 @@ func (c *tripCounter) headways(start time.Time, loc *time.Location) *Headways {
 			hs = append(hs, float64(ps[i]-ps[i-1]))
 		}
 		st, ok := HeadwayStats(hs)
-		if !ok || st.Mean > HeadwayMaxRef.Seconds() {
+		if !ok || st.Mean > maxRef.Seconds() {
 			continue
 		}
 		out.ByLine = append(out.ByLine, LineHeadway{Line: k.line, Dir: k.dir, N: len(hs),

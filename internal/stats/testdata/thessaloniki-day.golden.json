@@ -239,6 +239,7 @@
   "from_h": 7,
   "to_h": 21,
   "at": 0.5,
+  "max_headway_s": 900,
   "by_line": [
    {
     "line": "T",

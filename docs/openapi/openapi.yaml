@@ -2435,11 +2435,12 @@ components:
             Regularity (headway adherence) of the high-frequency lines of OASA's daily schedule (Athens)
             or of the GTFS (Thessaloniki): one
             entry per direction with at least 8 headways from 07:00 to 21:00 local at mid-route and a
-            mean observed headway of at most 600 s (TCQSM 4th ed., ch. 5). Missing when no direction qualifies.
-          required: [from_h, to_h, at, by_line]
+            mean observed headway of at most `max_headway_s` (600 s, TCQSM 4th ed., ch. 5; 900 s in Thessaloniki). Missing when no direction qualifies.
+          required: [from_h, to_h, at, max_headway_s, by_line]
           properties:
             from_h: {type: integer}
             to_h: {type: integer}
+            max_headway_s: {type: integer, description: "Limit on the mean headway of the listed directions: 600 (Athens) or 900 (Thessaloniki). Above 600 the bands are indicative."}
             at: {type: number, description: "Share of the route where passes are taken (0.5)."}
             by_line:
               type: array
