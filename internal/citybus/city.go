@@ -140,6 +140,24 @@ func (c *City) unix() int64 { return c.now().Unix() }
 
 func (c *City) base() string { return fmt.Sprintf("/el/%d", c.Conf.Agency) }
 
+// diskGate: one city at a time builds its model from static.json. All 28 cities at once at a start
+// peaked at about 400 MB of heap, over the 400 MB container; one at a time about 120 MB
+// (docs/research/zero-gap-deploys.md).
+var diskGate = make(chan struct{}, 1)
+
+// fetchGate: one city at a time reloads from citybus.gr. A reload holds the last file and the new
+// rows in memory at once.
+var fetchGate = make(chan struct{}, 1)
+
+func acquire(ctx context.Context, gate chan struct{}) error {
+	select {
+	case gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func getJSON[T any](ctx context.Context, c *City, path string, pri Priority) (*T, error) {
 	b, err := c.up.get(ctx, path, pri)
 	if err != nil || b == nil {
@@ -160,18 +178,28 @@ func (c *City) loadStatic(ctx context.Context, force bool, pri Priority) error {
 	defer c.loadMu.Unlock()
 	file := filepath.Join(c.dir, "static.json")
 	if !force {
+		if err := acquire(ctx, diskGate); err != nil {
+			return err
+		}
+		fresh := false
 		if b, err := os.ReadFile(file); err == nil {
 			var raw RawCity
 			if err := json.Unmarshal(b, &raw); err != nil {
 				c.log.Warn("static.json unreadable, loading again", "err", err)
 			} else {
 				c.install(&raw)
-				if c.unix()-raw.BuiltAt < 86400 {
-					return nil
-				}
+				fresh = c.unix()-raw.BuiltAt < 86400
 			}
 		}
+		<-diskGate
+		if fresh {
+			return nil
+		}
 	}
+	if err := acquire(ctx, fetchGate); err != nil {
+		return err
+	}
+	defer func() { <-fetchGate }()
 	lines, err := getJSON[[]RawLine](ctx, c, c.base()+"/lines", pri)
 	if err != nil {
 		return err
