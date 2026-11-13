@@ -125,7 +125,8 @@ func enumAfter(t *testing.T, doc, prefix string) []string {
 }
 
 // The contract revision in the code (/v1/status contract_rev) is the one the OpenAPI spec and
-// CONTRACT.md publish, and the Status schema documents the build fields (contract rev 24).
+// CONTRACT.md publish, and the Status schema documents the build fields (contract rev 24). The
+// fields stay optional in the schema: a rolled-back rev 23 server must still pass live-check.
 func TestDocsMatchContractRev(t *testing.T) {
 	spec := readDoc(t, "openapi/openapi.yaml")
 	want := "version: \"1 (contract rev " + strconv.Itoa(buildinfo.ContractRev) + ")\""
@@ -136,31 +137,20 @@ func TestDocsMatchContractRev(t *testing.T) {
 	if i < 0 {
 		t.Fatal("no Status schema in the spec")
 	}
-	required := enumAfterKey(t, spec[i:], "required: [")
+	schema := spec[i+1:]
+	schema = schema[:strings.Index(schema, "\n\n")]
 	for _, f := range []string{"rev", "contract_rev"} {
-		if !slices.Contains(required, f) {
-			t.Errorf("Status schema does not require %q: %v", f, required)
+		if !strings.Contains(schema, "\n        "+f+":\n") {
+			t.Errorf("Status schema has no property %q", f)
 		}
 	}
 	contract := readDoc(t, "CONTRACT.md")
+	if want := "\nRevision: " + strconv.Itoa(buildinfo.ContractRev) + " "; !strings.Contains(contract, want) {
+		t.Errorf("CONTRACT.md Revision line is not %q", strings.TrimSpace(want))
+	}
 	for _, f := range []string{`"rev"`, `"contract_rev"`} {
 		if !strings.Contains(contract, f) {
 			t.Errorf("CONTRACT.md /v1/status example has no %s", f)
 		}
 	}
-}
-
-// enumAfterKey splits the first "key: [a, b]" list in doc.
-func enumAfterKey(t *testing.T, doc, key string) []string {
-	t.Helper()
-	i := strings.Index(doc, key)
-	if i < 0 {
-		t.Fatalf("no %q", key)
-	}
-	rest := doc[i+len(key):]
-	var out []string
-	for _, f := range strings.Split(rest[:strings.IndexByte(rest, ']')], ",") {
-		out = append(out, strings.TrimSpace(f))
-	}
-	return out
 }

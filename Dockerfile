@@ -2,13 +2,14 @@
 # zone is embedded (timetzdata), so the image needs no tzdata.
 FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 ARG TARGETOS TARGETARCH
-# The git commit of the build, for /v1/status `rev`. .git is in .dockerignore, so this is the only
-# source of it in the image (image.yml passes github.sha).
-ARG REVISION
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# The git commit of the build, for /v1/status `rev`. .git is in .dockerignore, so this is the only
+# source of it in the image (image.yml passes github.sha).
+# Declared after `go mod download`, so a new commit keeps that layer cached.
+ARG REVISION
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -tags timetzdata \
     -ldflags="-s -w -X github.com/angelospk/athens-transit-rt/internal/buildinfo.Revision=${REVISION}" -o /out/atrt ./cmd/atrt && mkdir -p /out/state
 

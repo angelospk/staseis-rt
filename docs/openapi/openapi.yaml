@@ -2175,7 +2175,7 @@ components:
 
     Status:
       type: object
-      required: [ok, gtfs_version, gtfs_expires, updated_at, lines_active, budget_rps, rev, contract_rev]
+      required: [ok, gtfs_version, gtfs_expires, updated_at, lines_active, budget_rps]
       properties:
         ok:
           type: boolean
@@ -2197,7 +2197,7 @@ components:
           description: OASA requests per second the poller may use.
         rev:
           type: string
-          description: "Git commit the server was built from; `dev` for a local build without VCS info."
+          description: "Git commit the server was built from; `dev` for a local build without VCS info. Rev 24; optional, so a rolled-back older server still matches."
         contract_rev:
           type: integer
           description: "Contract revision the server implements (rev 24)."

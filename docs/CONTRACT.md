@@ -14,7 +14,9 @@ Source of truth: `athens-transit-rt/docs/CONTRACT.md`. The frontend keeps a copy
   frontend repo by whoever made it (backend thread opens the copy as a commit or
   issue on the frontend repo).
 
-Revision: 23 (2026-11-13): `/v2` bus and trolley Vehicles get `quality`, their live level
+Revision: 24 (2026-11-14): `/v1/status` and the citybus `/{city}/v1/status` get `rev` and
+`contract_rev`, the build that answers ([below](#get-v1status));
+rev 23 (2026-11-13): `/v2` bus and trolley Vehicles get `quality`, their live level
 against the usual service, and `/v2/lines/{id}/vehicles` gets `segments`, the live level of each
 stretch between two stops ([Live quality](#live-quality-rev-23));
 rev 22 (2026-11-11): `/v1/stops/{stop_id}` gets `warming`, `true` while a line of the stop
