@@ -205,3 +205,52 @@ A line counts as live when a bus with a position showed on it at least once. Cla
 - NONE: drama, kastoria (all lines now timetable-only), naousa, skiathos (fewer than 7 tracked days, so not timetable-only yet).
 - PARTIAL: chalkida (6 of 13 lines; 2 live in the last 24 h).
 - Since 2026-11-07: chalkida moved from NONE to PARTIAL. serres (3 to 19 of 20), ptolemaida (3 to 10 of 12), veroia (8 to 14), kavala (7 to 14) and agrinio (9 to 14) are now LIVE. ptolemaida had only 4 lines live in the last 24 h; agrinio had 0 buses at 10:00.
+
+## Scheduled vs live (7 days)
+
+Samples every 10 min, 2026-11-07 21:16 to 2026-11-14 19:50 (Athens), 27,434 rows. One corrupt row (2026-11-09 08:20) was dropped.
+
+Method: `scheduled_running` = trips of the citybus.gr timetable (local snapshot of `static.json`, built 2026-11-06 19:51) between their first and last stop time. `live_seen` = buses (gps + estimate) on `https://staseis-rt.haroldpoi.dev/debug`. Ratio = live_seen / scheduled_running, median per hour band, only samples with scheduled_running > 0. "gps share" = gps / live_seen over all samples.
+
+| city | 06-10 | 10-14 | 14-18 | 18-22 | 22-06 | all | gps share | lines live / sched |
+|---|---|---|---|---|---|---|---|---|
+| agq | - | - | - | - | - | - | 36% | - |
+| dra | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | - | 0.00 |
+| kso | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | - | 0.00 |
+| nao | 0.00 | 0.00 | 0.00 | 0.00 | - | 0.00 | - | 0.00 |
+| pto | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 44% | 0.05 |
+| cha | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 56% | 0.02 |
+| jsi | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | - | 0.00 |
+| ver | 0.43 | 0.50 | 0.50 | 0.50 | 0.00 | 0.50 | 57% | 0.48 |
+| kom | 0.73 | 1.00 | 0.86 | 0.86 | 0.00 | 0.62 | 57% | 0.78 |
+| kat | 0.56 | 0.70 | 0.71 | 0.75 | 0.50 | 0.67 | 46% | 0.74 |
+| chq | 0.71 | 0.83 | 0.83 | 0.79 | 0.00 | 0.74 | 53% | 0.80 |
+| jkh | 0.67 | 0.80 | 0.75 | 0.00 | - | 0.75 | 65% | 0.75 |
+| axd | 0.78 | 0.75 | 0.79 | 0.75 | 1.00 | 0.77 | 54% | 0.82 |
+| her | 0.82 | 0.83 | 0.82 | 0.81 | 0.00 | 0.78 | 53% | 0.74 |
+| mjt | 0.70 | 0.80 | 0.85 | 1.00 | 0.50 | 0.78 | 64% | 0.82 |
+| art | 0.75 | 0.88 | 0.75 | 1.00 | 0.00 | 0.80 | 47% | 0.81 |
+| ser | 0.75 | 0.86 | 0.80 | 1.00 | 0.50 | 0.80 | 62% | 0.78 |
+| kzi | 0.69 | 0.75 | 0.78 | 1.00 | 1.00 | 0.82 | 47% | 0.81 |
+| pat | 0.86 | 0.91 | 0.94 | 0.93 | 0.00 | 0.86 | 46% | 0.86 |
+| sal | 1.00 | 0.86 | 0.86 | 0.86 | 0.33 | 0.89 | 59% | 0.91 |
+| kva | 0.87 | 0.88 | 1.00 | 0.89 | 1.00 | 0.91 | 71% | 0.92 |
+| cfu | 0.92 | 0.89 | 1.00 | 1.00 | 1.00 | 0.93 | 44% | 0.99 |
+| vol | 1.00 | 1.00 | 1.00 | 1.04 | 0.82 | 1.00 | 54% | 0.93 |
+| ioa | 0.96 | 1.00 | 0.95 | 1.00 | 1.00 | 1.00 | 51% | 0.90 |
+| lam | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 56% | 0.97 |
+| lra | 1.00 | 1.07 | 1.00 | 1.03 | 1.00 | 1.00 | 50% | 0.99 |
+| mes | 1.00 | 1.00 | 0.89 | 1.00 | 1.00 | 1.00 | 46% | 0.83 |
+| xan | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 52% | 0.94 |
+
+Classification (day bands 06-22):
+
+- NO GPS (ratio < 0.1, no live bus): drama (dra), kastoria (kso), naousa (nao), skiathos (jsi). Almost no GPS: ptolemaida (pto, scheduled median 4, live at most 2) and chalkida (cha, scheduled median 10, live at most 2).
+- Timetable missing: agrinio (agq). scheduled_running is 0 in all samples, but buses run (median 2, max 15 live in day bands). The ratio cannot be computed.
+- LIKELY MISSING: veroia (ver), ratio 0.43-0.50 with scheduled ≥ 3 in 152 samples. In 240 other day samples buses run while the timetable has no trip, so the timetable times look wrong too.
+- OK (≥ 0.6): all other cities. chios (jkh) has a median of 1 scheduled trip, so its ratio is weak.
+- No band is above 1.3, so no city shows a timetable that undercounts at scale. The 0.00 in band 22-06 for some OK cities comes from few late trips (last trip near 22:00).
+
+Official timetables (KTEL sites/PDFs) are worth collecting by hand only for agrinio and veroia. For the NO GPS cities they add nothing: the citybus.gr timetable already serves them as timetable-only.
+
+Raw data: mini PC `~/citybus-coverage/coverage.csv` (cols `ts,city,scheduled_running,live_seen,gps,estimate,lines_scheduled,lines_live`); summary script `~/citybus-coverage/report.py`.
