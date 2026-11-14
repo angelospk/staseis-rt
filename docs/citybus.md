@@ -164,3 +164,44 @@ kept for that city. All 28 cities passed with 0 upstream errors and
 - Cities with more than ~55 probes (agrinio, ioannina, katerini, larissa, patras) run a cycle of 59 s, at the
   60 s limit; for them the gap drops below 1000 ms (789-967 ms) to keep the cycle under 60 s.
 - The Bun bridge (`citybus-bridge`) is stopped and disabled since the last city moved.
+
+## Live coverage (7 days)
+
+A line counts as live when a bus with a position showed on it at least once. Class: LIVE (70 % or more of the lines ever live), PARTIAL, NONE (no line ever live). A line becomes timetable-only after 7 tracked days with no live bus (`internal/citybus/health.go`). The 2026-11-07 column is the 18:00 baseline (lines ever live then).
+
+### 2026-11-14 10:00 (Saturday), production (oracle-vm, atrt-citybus)
+
+| City | Tracked days | Lines | Ever live | Timetable-only | Live 24 h | Buses now (gps / estimate) | Class | 2026-11-07 |
+|---|---|---|---|---|---|---|---|---|
+| agrinio (agq) | 7.8 | 14 | 14 | 0 | 14 | 0 (0 / 0) | LIVE | 9/14 |
+| alexandroupoli (axd) | 7.6 | 18 | 18 | 0 | 17 | 4 (3 / 1) | LIVE |  |
+| arta (art) | 7.1 | 9 | 9 | 0 | 9 | 2 (1 / 1) | LIVE |  |
+| veroia (ver) | 7.1 | 19 | 14 | 5 | 14 | 0 (0 / 0) | LIVE | 8/19 |
+| volos (vol) | 7.1 | 12 | 12 | 0 | 12 | 21 (12 / 9) | LIVE |  |
+| drama (dra) | 7.1 | 13 | 0 | 13 | 0 | 0 (0 / 0) | NONE | 0 live |
+| heraklion (her) | 7.8 | 24 | 21 | 3 | 21 | 20 (16 / 4) | LIVE |  |
+| ioannina (ioa) | 7.1 | 16 | 16 | 0 | 15 | 8 (7 / 1) | LIVE |  |
+| kavala (kva) | 7.1 | 19 | 14 | 5 | 11 | 9 (4 / 5) | LIVE | 7/19 |
+| kastoria (kso) | 7.1 | 18 | 0 | 18 | 0 | 0 (0 / 0) | NONE | 0 live |
+| katerini (kat) | 7.1 | 14 | 13 | 1 | 13 | 6 (4 / 2) | LIVE |  |
+| corfu (cfu) | 6.9 | 12 | 12 | 0 | 12 | 9 (9 / 0) | LIVE |  |
+| kozani (kzi) | 6.9 | 16 | 15 | 0 | 13 | 4 (4 / 0) | LIVE |  |
+| komotini (kom) | 6.9 | 14 | 14 | 0 | 13 | 6 (3 / 3) | LIVE |  |
+| lamia (lam) | 6.9 | 13 | 13 | 0 | 13 | 9 (7 / 2) | LIVE |  |
+| larissa (lra) | 6.8 | 20 | 19 | 0 | 17 | 20 (16 / 4) | LIVE |  |
+| mesologgi (mes) | 6.8 | 6 | 6 | 0 | 5 | 0 (0 / 0) | LIVE |  |
+| mitilini (mjt) | 6.8 | 8 | 8 | 0 | 8 | 3 (3 / 0) | LIVE |  |
+| naousa (nao) | 6.8 | 6 | 0 | 0 | 0 | 0 (0 / 0) | NONE | 0 live |
+| xanthi (xan) | 6.8 | 15 | 15 | 0 | 11 | 3 (1 / 2) | LIVE |  |
+| patras (pat) | 7.8 | 30 | 28 | 2 | 28 | 22 (16 / 6) | LIVE |  |
+| ptolemaida (pto) | 6.8 | 12 | 10 | 0 | 4 | 0 (0 / 0) | LIVE | 3/12 |
+| serres (ser) | 6.8 | 20 | 19 | 0 | 15 | 3 (3 / 0) | LIVE | 3/20 |
+| chalkida (cha) | 6.8 | 13 | 6 | 0 | 2 | 0 (0 / 0) | PARTIAL | 0 live |
+| chania (chq) | 6.8 | 13 | 13 | 0 | 13 | 13 (8 / 5) | LIVE |  |
+| chios (jkh) | 6.8 | 2 | 2 | 0 | 2 | 1 (0 / 1) | LIVE |  |
+| salamina (sal) | 6.7 | 8 | 8 | 0 | 7 | 4 (4 / 0) | LIVE |  |
+| skiathos (jsi) | 6.7 | 1 | 0 | 0 | 0 | 0 (0 / 0) | NONE | 0 live |
+
+- NONE: drama, kastoria (all lines now timetable-only), naousa, skiathos (fewer than 7 tracked days, so not timetable-only yet).
+- PARTIAL: chalkida (6 of 13 lines; 2 live in the last 24 h).
+- Since 2026-11-07: chalkida moved from NONE to PARTIAL. serres (3 to 19 of 20), ptolemaida (3 to 10 of 12), veroia (8 to 14), kavala (7 to 14) and agrinio (9 to 14) are now LIVE. ptolemaida had only 4 lines live in the last 24 h; agrinio had 0 buses at 10:00.
