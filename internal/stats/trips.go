@@ -199,6 +199,7 @@ type tripCounter struct {
 	tripAt        map[dirVeh]tripAt  // GTFSHeadways: the last measured fix of a vehicle on a direction
 	tripPass      []int64            // GTFSHeadways: the earliest pass of each plan trip (0: none)
 	stamped, ours int                // rows of the day with a feed version, and those of the plan's
+	fixMin        map[int64]int      // fixes of every line by minute (unix time / 60): outages in the headways
 }
 
 // dirVeh is a vehicle on the GTFS trips of one line and direction: the matcher can move a bus
@@ -279,6 +280,15 @@ func (s *tripSeen) note(sm float64, sp Span) {
 	} else {
 		s.lo, s.hi = min(s.lo, sm), max(s.hi, sm)
 	}
+}
+
+// noteFix counts one fix of any line, matched or not, at unix time t: the city-wide fixes of
+// each minute say when the backend collected nothing (headways drops the passes across that).
+func (c *tripCounter) noteFix(t int64) {
+	if c.fixMin == nil {
+		c.fixMin = map[int64]int{}
+	}
+	c.fixMin[t/60]++
 }
 
 // add counts one matched row: fix time t, vehicle, trip id, feed version and metres along the

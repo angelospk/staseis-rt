@@ -21,6 +21,14 @@ const (
 	// direction there has a mean headway of 10 min or less, so the block would never appear.
 	// Above 10 min riders partly follow the timetable, so the block says which limit it used.
 	HeadwayMaxRefGTFS = 15 * time.Minute
+	// HeadwayOutageMin: a run of this many minutes in a row with sparse fixes city-wide is an
+	// outage of the backend, not of the buses: no headway is taken across it. It is HeadwayMaxGap
+	// in minutes: no bus can be placed over a hole that long.
+	HeadwayOutageMin = int(HeadwayMaxGap / time.Minute)
+	// HeadwayOutageShare: a minute is sparse when its fixes (all lines of the city) are under this
+	// share of the median minute of the window. On 2026-11-13 Thessaloniki, where the fixes of
+	// the degraded 13:20-13:50 outage were 12-30 % of the median minute, the cut is 30 %.
+	HeadwayOutageShare = 0.3
 	// HeadwayMinN: a direction with fewer headways is left out.
 	HeadwayMinN = 8
 )
@@ -137,12 +145,15 @@ func (c *tripCounter) headways(start time.Time, loc *time.Location) *Headways {
 	if c.plan.GTFSHeadways {
 		maxRef = HeadwayMaxRefGTFS
 	}
+	holes := c.outages(from, to)
 	out := &Headways{FromH: HeadwayFromH, ToH: HeadwayToH, At: HeadwayAt, MaxS: int64(maxRef.Seconds()), ByLine: []LineHeadway{}}
 	for k, ps := range passes {
 		sort.Slice(ps, func(a, b int) bool { return ps[a] < ps[b] })
 		hs := make([]float64, 0, len(ps))
 		for i := 1; i < len(ps); i++ {
-			hs = append(hs, float64(ps[i]-ps[i-1]))
+			if !spans(holes, ps[i-1], ps[i]) {
+				hs = append(hs, float64(ps[i]-ps[i-1]))
+			}
 		}
 		st, ok := HeadwayStats(hs)
 		if !ok || st.Mean > maxRef.Seconds() {
@@ -164,6 +175,47 @@ func (c *tripCounter) headways(start time.Time, loc *time.Location) *Headways {
 		return a.Dir < b.Dir
 	})
 	return out
+}
+
+// outages are the runs of at least HeadwayOutageMin minutes in [from, to) (unix seconds, on a
+// minute) in which the city-wide fixes of each minute are under HeadwayOutageShare of the
+// median minute, as half-open [start, end) seconds. None when no fix count was kept (or the
+// median is 0: the share is then 0 and no minute is under it).
+func (c *tripCounter) outages(from, to int64) [][2]int64 {
+	if len(c.fixMin) == 0 || to <= from {
+		return nil
+	}
+	n := int((to - from) / 60)
+	counts := make([]int, n)
+	for i := range counts {
+		counts[i] = c.fixMin[from/60+int64(i)]
+	}
+	sorted := append([]int(nil), counts...)
+	sort.Ints(sorted)
+	limit := HeadwayOutageShare * float64(sorted[n/2])
+	var out [][2]int64
+	run := 0
+	for i := 0; i <= n; i++ {
+		if i < n && float64(counts[i]) < limit {
+			run++
+			continue
+		}
+		if run >= HeadwayOutageMin {
+			out = append(out, [2]int64{from + int64(i-run)*60, from + int64(i)*60})
+		}
+		run = 0
+	}
+	return out
+}
+
+// spans: whether the time between two passes a < b overlaps one of the outages.
+func spans(holes [][2]int64, a, b int64) bool {
+	for _, h := range holes {
+		if h[0] < b && h[1] > a {
+			return true
+		}
+	}
+	return false
 }
 
 func round3(x float64) float64 { return math.Round(x*1000) / 1000 }
