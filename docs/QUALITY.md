@@ -4,7 +4,7 @@ The single place to learn what we measure about bus service quality, what each c
 what the user sees, and what comes next. **Keep it current.** Any change to stats, quality
 measures or their display updates this file in the same PR or commit (see "How to update").
 
-Last update: 2026-11-13 (live levels, #173).
+Last update: 2026-11-14 (headways skip collection outages, #164).
 
 ## Sources
 
@@ -22,7 +22,7 @@ Last update: 2026-11-13 (live levels, #173).
 
 | Measure | Applies to | Definition | Field (daily stats) |
 |---|---|---|---|
-| Headway regularity | lines with a mean observed headway ≤ 10 min (Thessaloniki: ≤ 15 min, `max_headway_s` 900, indicative above 10), 07:00–21:00, at mid-route | `cv_h` = population stddev / mean headway; `wait_min` = 0.5·mean·(1 + cv_h²); `ewt_min` = wait − mean/2; `off_headway_share` = share with \|h − mean\| > mean/2 | `headways` |
+| Headway regularity | lines with a mean observed headway ≤ 10 min (Thessaloniki: ≤ 15 min, `max_headway_s` 900, indicative above 10), 07:00–21:00, at mid-route | `cv_h` = population stddev / mean headway, taken over headways that do not span a collection outage (below); `wait_min` = 0.5·mean·(1 + cv_h²); `ewt_min` = wait − mean/2; `off_headway_share` = share with \|h − mean\| > mean/2 | `headways` |
 | Frequency band | every line with ≥ 4 daytime departures | mean scheduled headway 07:00–21:00, bands ≤5, 5–10, 11–15, 16–30, 31–59, 60, >60 min | `frequency` |
 | Origin on-time (OTP) | lines with a timetable and a known scheduled departure | on time = departure 1 min early to 5 min late (`early_s`, `late_s`; rt#178); earlier counts as not on time and is reported apart | `origin_otp` |
 | Start delay | Athens (OASA daily schedule) | delay of each run at its first stop: mean, p90, histogram | `start_delay` |
@@ -61,6 +61,16 @@ Replay of real history (`atrt quality-replay`, Tuesday 2026-10-27, 15 training w
 The schedule basis is pessimistic in this replay: those days ran on an expired GTFS, and the old
 history has no `run_start`, so the delays are against the GTFS and not against OASA's daily
 schedule as the server shows them (rev 14). Check the split again on a recent day.
+
+**Collection outages (rt#164 follow-up).** A headway between two consecutive passes is dropped
+when the time between them overlaps a run of ≥ 5 minutes in which the city-wide fixes per
+minute (all lines of the city, from the day's history rows) are under 30 % of the window's
+median minute (`HeadwayOutageShare`, `HeadwayOutageMin`, `internal/stats/headway.go`). It applies
+to every city and plan, with no change to the JSON. Thessaloniki 2026-11-13 (outages 13:20–13:50
+at 12–30 % of the usual fixes, 14:40–16:10 at about 0): median cv_h 0.99 → 0.46, 19 → 36
+directions qualify (the outage headways had pushed their mean over the limit). A normal day
+(2026-11-12) is byte-identical. Not done: filtering on the scheduled mean headway, so that missing
+passes cannot hide or admit a line (03K/0).
 
 The reference for regularity is the **observed** headway: the scheduled one at mid-route is
 not known. So it measures evenness, not whether the promised frequency was kept. Say so when

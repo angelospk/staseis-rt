@@ -362,6 +362,9 @@ func readFile(path string, from, to int64, recs []rec, strs map[string]string, t
 		if t < from || t >= to {
 			continue
 		}
+		if trips != nil {
+			trips.noteFix(t)
+		}
 		if trips != nil && g != "" {
 			trips.stamp(g)
 		}
