@@ -41,7 +41,7 @@ browser code can read the server's `Date`. Times are Unix seconds.
 ```bash
 # Health and GTFS version
 curl -s https://transit.haroldpoi.dev/v1/status
-# {"ok":true,"gtfs_version":"2026-07-08","gtfs_expires":"2026-10-06","updated_at":1791229867,"lines_active":236,"budget_rps":4}
+# {"ok":true,"gtfs_version":"2026-07-08","gtfs_expires":"2026-10-06","updated_at":1791229867,"lines_active":236,"budget_rps":4,"rev":"<40-hex sha>","contract_rev":24}
 
 # Vehicles of line 040
 curl -s https://transit.haroldpoi.dev/v1/lines/040

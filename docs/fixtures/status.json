@@ -4,5 +4,7 @@
  "gtfs_expires": "2026-10-06",
  "updated_at": 1791187852,
  "lines_active": 212,
- "budget_rps": 4
+ "budget_rps": 4,
+ "rev": "242232e1fa4ba838a5cc1ff45c6f1c3377f1079b",
+ "contract_rev": 24
 }

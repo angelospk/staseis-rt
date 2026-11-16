@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/angelospk/athens-transit-rt/internal/buildinfo"
 	"github.com/angelospk/athens-transit-rt/internal/sched"
 )
 
@@ -38,6 +39,8 @@ type StatusResponse struct {
 	UpdatedAt   int64   `json:"updated_at"`
 	LinesActive int     `json:"lines_active"`
 	BudgetRPS   float64 `json:"budget_rps"`
+	Rev         string  `json:"rev"`
+	ContractRev int     `json:"contract_rev"`
 }
 
 // Handler serves the live API of docs/CONTRACT.md.
@@ -210,7 +213,7 @@ func (a *App) Status() StatusResponse {
 		updated = lastPublish.Unix()
 	}
 	return StatusResponse{OK: ok, GTFSVersion: a.gtfsVersion(), GTFSExpires: a.gtfsExpires(), UpdatedAt: updated,
-		LinesActive: active, BudgetRPS: a.pacer.BaseRPS()}
+		LinesActive: active, BudgetRPS: a.pacer.BaseRPS(), Rev: buildinfo.Rev(), ContractRev: buildinfo.ContractRev}
 }
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {

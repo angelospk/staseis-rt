@@ -23,6 +23,7 @@ import (
 	rt "github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/angelospk/athens-transit-rt/internal/buildinfo"
 	"github.com/angelospk/athens-transit-rt/internal/gtfs"
 	"github.com/angelospk/athens-transit-rt/internal/gtfs/gtfstest"
 	"github.com/angelospk/athens-transit-rt/internal/match"
@@ -209,6 +210,23 @@ func TestInactiveLineAtNight(t *testing.T) {
 	res, body := get(t, a, "/v1/lines/L")
 	if res.StatusCode != 200 || !strings.Contains(string(body), `"vehicles":[]`) || maxAge(t, res) != 120 {
 		t.Fatalf("inactive: %d %s", res.StatusCode, body)
+	}
+}
+
+// TestStatusBuild (contract rev 24): /v1/status names the build that answers, so the promotion
+// gate can confirm which commit each host runs.
+func TestStatusBuild(t *testing.T) {
+	a := newApp(t, monday1020)
+	_, body := get(t, a, "/v1/status")
+	var st struct {
+		Rev         *string `json:"rev"`
+		ContractRev *int    `json:"contract_rev"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Rev == nil || *st.Rev != buildinfo.Rev() || st.ContractRev == nil || *st.ContractRev != buildinfo.ContractRev {
+		t.Fatalf("status %s: want rev %q, contract_rev %d", body, buildinfo.Rev(), buildinfo.ContractRev)
 	}
 }
 

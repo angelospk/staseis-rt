@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/angelospk/athens-transit-rt/internal/buildinfo"
 )
 
 // The answers, in the atrt contract shapes (docs/CONTRACT.md: /v1 tiles, lines, stops; /v2), as
@@ -166,7 +168,7 @@ func (c *City) status() obj {
 	}
 	gap := c.up.pacer().gapNow()
 	return obj{"ok": c.model != nil, "gtfs_version": version, "gtfs_expires": "", "updated_at": now, "lines_active": len(lines),
-		"budget_rps": math.Round(float64(time.Second)/float64(gap)*100) / 100}
+		"budget_rps": math.Round(float64(time.Second)/float64(gap)*100) / 100, "rev": buildinfo.Rev(), "contract_rev": buildinfo.ContractRev}
 }
 
 // healthReport: which lines sent a live bus in the last Days; it survives a restart in health.json.
