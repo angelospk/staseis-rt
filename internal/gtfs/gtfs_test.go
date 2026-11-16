@@ -109,6 +109,52 @@ func TestServiceActive(t *testing.T) {
 	}
 }
 
+// OSETH (Thessaloniki) publishes feeds with an empty calendar.txt: every service is a list of
+// dates in calendar_dates.txt. When such a feed expires, the same weekday inside it must still
+// say which lines run (as for a feed with a calendar), or no bus is polled until the next feed.
+func TestServiceActiveCalendarLess(t *testing.T) {
+	files := sampleFiles()
+	files["calendar.txt"] = "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+	files["calendar_dates.txt"] = "service_id,date,exception_type\n" +
+		"day_1,20261005,1\n" + // Monday
+		"day_1,20261012,1\n" + // Monday
+		"day_1,20261014,1\n" + // Wednesday
+		"day_1,20261013,2\n" // Tuesday removed (no effect: not added)
+	f, err := LoadZip(writeZip(t, files), LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := f.Trip(f.TripIndex("t1")).Service
+	day := func(s string) time.Time {
+		d, _ := time.ParseInLocation("2006-01-02", s, Athens)
+		return d
+	}
+	cases := map[string]bool{
+		"2026-10-05": true,  // Monday listed
+		"2026-10-06": false, // Tuesday inside the feed, not listed
+		"2026-10-14": true,  // Wednesday listed
+		"2026-10-19": true,  // Monday after the feed: the Monday of 12 Oct stands in
+		"2026-10-26": true,  // Monday two weeks after
+		"2026-10-20": false, // Tuesday after the feed: 13 Oct has no service
+		"2026-10-21": true,  // Wednesday after the feed: 14 Oct
+		"2026-09-28": true,  // Monday before the feed: 5 Oct
+	}
+	for d, want := range cases {
+		if got := f.ServiceActive(svc, day(d)); got != want {
+			t.Errorf("%s: active=%v want %v", d, got, want)
+		}
+	}
+	if got := f.FeedStart().Format("2006-01-02"); got != "2026-10-05" {
+		t.Errorf("feed start %s, want the first listed date", got)
+	}
+	if got := f.FeedEnd().Format("2006-01-02"); got != "2026-10-14" {
+		t.Errorf("feed end %s, want the last listed date", got)
+	}
+	if !f.Expired(day("2026-10-19").Add(12 * time.Hour)) {
+		t.Error("19 Oct is after the feed: Expired must be true")
+	}
+}
+
 func TestCandidateTrips(t *testing.T) {
 	f := load(t)
 	// Tuesday 00:30: n1 belongs to Monday's service day and runs 24:20-24:40.

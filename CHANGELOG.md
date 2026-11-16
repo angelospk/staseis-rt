@@ -72,6 +72,10 @@ for self-hosting. API reference: [docs/API.md](docs/API.md), OpenAPI 3.1:
   `start_delay_s` ([#72](https://github.com/angelospk/athens-transit-rt/issues/72)).
 
 ### Live API
+- Thessaloniki: after its GTFS expired, no bus was polled until the next feed (16 Nov 2026: 0
+  trips, `lines_active` 0, no vehicles). OSETH feeds have an empty `calendar.txt` and list every
+  running date in `calendar_dates.txt`; the expired-feed rule (same weekday inside the feed) now
+  reads those dates too, and the feed's start and end come from them.
 - An OASA Stop gets `code`, the code on the stop sign (GTFS `stop_code`, e.g. `040054` for
   `oasa:40054`), also in the `stop` of `/v1/stops/{stop_id}`, so a client can show the number a
   rider sees on the pole (contract rev 21).

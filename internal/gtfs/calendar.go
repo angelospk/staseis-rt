@@ -36,21 +36,30 @@ func ServiceDate(day time.Time) string { return dayDate(day).Format("20060102") 
 // whole weeks inside it decides (PlanningTime); exceptions apply to their own date only.
 func (f *Feed) ServiceActive(service int32, day time.Time) bool {
 	date := dayDate(day)
+	s := &f.Services[service]
+	if s.End == 0 {
+		// No calendar row (OSETH feeds list every running date in calendar_dates.txt): the
+		// dates are the schedule, so an expired feed reads them at the same weekday inside it.
+		return f.Exceptions[int64(service)<<32|int64(yyyymmdd(f.PlanningTime(date)))] == 1
+	}
 	d := yyyymmdd(date)
 	if exc, ok := f.Exceptions[int64(service)<<32|int64(d)]; ok {
 		return exc == 1
 	}
-	s := &f.Services[service]
 	wd := (int(date.Weekday()) + 6) % 7 // Monday = 0
 	d = yyyymmdd(f.PlanningTime(date))
 	return s.Start <= d && d <= s.End && s.Days[wd]
 }
 
-// FeedEnd is the last calendar end_date, or the zero time without a calendar.
+// FeedEnd is the last calendar end_date, or the zero time without a calendar. A feed with
+// no calendar rows at all ends on its last added date (calendar_dates.txt).
 func (f *Feed) FeedEnd() time.Time {
 	var end int32
 	for _, s := range f.Services {
 		end = max(end, s.End)
+	}
+	if end == 0 && f.calendarLess() {
+		_, end = f.addedSpan()
 	}
 	if end == 0 {
 		return time.Time{}
@@ -58,7 +67,8 @@ func (f *Feed) FeedEnd() time.Time {
 	return fromYYYYMMDD(end)
 }
 
-// FeedStart is the first calendar start_date, or the zero time without a calendar.
+// FeedStart is the first calendar start_date, or the zero time without a calendar. A feed
+// with no calendar rows at all starts on its first added date (calendar_dates.txt).
 func (f *Feed) FeedStart() time.Time {
 	var start int32
 	for _, s := range f.Services {
@@ -66,10 +76,38 @@ func (f *Feed) FeedStart() time.Time {
 			start = s.Start
 		}
 	}
+	if start == 0 && f.calendarLess() {
+		start, _ = f.addedSpan()
+	}
 	if start == 0 {
 		return time.Time{}
 	}
 	return fromYYYYMMDD(start)
+}
+
+// calendarLess reports a feed whose services all come from calendar_dates.txt.
+func (f *Feed) calendarLess() bool {
+	for _, s := range f.Services {
+		if s.End != 0 {
+			return false
+		}
+	}
+	return len(f.Services) > 0
+}
+
+// addedSpan is the first and last date a service is added (exception type 1), or 0, 0.
+func (f *Feed) addedSpan() (first, last int32) {
+	for k, exc := range f.Exceptions {
+		if exc != 1 {
+			continue
+		}
+		d := int32(k & 0xffffffff)
+		if first == 0 || d < first {
+			first = d
+		}
+		last = max(last, d)
+	}
+	return first, last
 }
 
 // PlanningTime maps now into the feed's validity by whole weeks (same weekday and wall
