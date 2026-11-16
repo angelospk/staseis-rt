@@ -255,6 +255,28 @@ func TestV2PlanExpiredGTFS(t *testing.T) {
 	}
 }
 
+// A city without a daily schedule (Thessaloniki: OASTH has none) never waits for one: on an
+// expired GTFS the plan keeps the rides of the same weekday inside the feed, and oasa is not
+// warming_up.
+func TestV2PlanExpiredGTFSNoDailySchedule(t *testing.T) {
+	now := expiredMonday
+	a := planAt(t, &now, func(a *App) {
+		c, err := CityByID("thessaloniki")
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.city = c
+	})
+	var p v2Plan
+	_, ma := v2get(t, a, "/v2/plan?from="+atS0+"&to="+atS3+"&n=5", &p)
+	if stateOf(p.Sources, "oasa") == model.WarmingUp || len(p.Itineraries) == 0 {
+		t.Fatalf("max-age %d %s", ma, asJSON(p))
+	}
+	if run := p.Itineraries[0].Legs[1].Run; run != "oasa:run:T02:2026-10-12" {
+		t.Errorf("first ride %s, want the GTFS trip T02 of the same weekday", run)
+	}
+}
+
 func withDaily(t *testing.T, deps ...string) func(*App) {
 	return func(a *App) {
 		a.daily = func(context.Context, string) (telematics.DailySchedule, error) {

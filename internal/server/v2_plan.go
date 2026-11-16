@@ -150,7 +150,7 @@ func (a *App) planTick(now time.Time) {
 		due = true
 	case !s.noon.Equal(noon):
 		start, _ := planBounds(noon)
-		due = !expired(w.feed, noon) || a.prefetchedDay() == noon.Format(time.DateOnly) ||
+		due = !a.awaitsDaily(w.feed, noon) || a.prefetchedDay() == noon.Format(time.DateOnly) ||
 			!now.Before(start.Add(planLateBuild-planDayStart))
 	case !gtfs.Midnight(now).Equal(gtfs.Midnight(noon)):
 		// Past midnight the caches move on to the next calendar day (a line's daily schedule, the
@@ -323,7 +323,7 @@ func (a *App) planOASA(b *planBuild, w *world, noon time.Time) {
 		}
 		b.in.Trips = append(b.in.Trips, pt)
 	}
-	if !expired(f, noon) {
+	if !a.awaitsDaily(f, noon) {
 		for _, day := range []time.Time{noon, noon.AddDate(0, 0, 1)} {
 			ref := gtfs.ServiceDay(day)
 			active := map[int32]bool{}
@@ -632,7 +632,7 @@ func (a *App) planSources(now, noon time.Time) []model.SourceState {
 		if src[i].ID != oasaNS {
 			continue
 		}
-		if w := a.world(); w != nil && expired(w.feed, noon) && !a.anyDailyCached(gtfs.Midnight(noon)) {
+		if w := a.world(); w != nil && a.awaitsDaily(w.feed, noon) && !a.anyDailyCached(gtfs.Midnight(noon)) {
 			src[i].State = model.WarmingUp
 		}
 	}

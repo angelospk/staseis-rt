@@ -92,6 +92,12 @@ func expired(f *gtfs.Feed, now time.Time) bool {
 	return !end.IsZero() && gtfs.Midnight(now).After(end)
 }
 
+// awaitsDaily: the feed expired and OASA's daily schedule stands in for it. A city without
+// daily schedules (Thessaloniki) never does: its expired GTFS is read by weekday (gtfs.PlanningTime).
+func (a *App) awaitsDaily(f *gtfs.Feed, now time.Time) bool {
+	return a.city.Rail && expired(f, now)
+}
+
 // modes is the mode of every line of the world's feed, built once per feed.
 func (w *world) lineModes() map[string]string {
 	w.modesOnce.Do(func() {
